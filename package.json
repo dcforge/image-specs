@@ -1,5 +1,5 @@
 {
-  "name": "image-specs",
+  "name": "@dcforge/image-specs",
   "version": "1.0.0",
   "description": "Extract image specifications from URLs or streams with TypeScript support",
   "keywords": [
