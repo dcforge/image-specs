@@ -4,9 +4,14 @@ import { BufferReader } from '../utils/index.js';
 /**
  * Determine color space from ICC profile data (similar to WebP)
  */
-function getColorSpaceFromProfileData(profileData: Buffer): { profileName?: string; colorSpace?: string } {
+function getColorSpaceFromProfileData(profileData: Buffer): {
+  profileName?: string;
+  colorSpace?: string;
+} {
   // Convert to string, looking for common profile names
-  const profileStr = profileData.toString('ascii', 0, Math.min(profileData.length, 512)).replace(/\0/g, ' ');
+  const profileStr = profileData
+    .toString('ascii', 0, Math.min(profileData.length, 512))
+    .replace(/\0/g, ' ');
 
   // Common ICC profile patterns
   const patterns = [
@@ -80,7 +85,10 @@ function parseIspe(reader: BufferReader): { width: number; height: number } | nu
 /**
  * Parse colr (Color Information) box
  */
-function parseColr(reader: BufferReader, size: number): {
+function parseColr(
+  reader: BufferReader,
+  size: number
+): {
   colorSpace?: string;
   iccProfile?: string;
   colorPrimaries?: number;
@@ -100,7 +108,7 @@ function parseColr(reader: BufferReader, size: number): {
       const { profileName, colorSpace } = getColorSpaceFromProfileData(iccData);
       return {
         colorSpace: colorSpace ?? 'ICC Profile',
-        iccProfile: profileName ?? 'Embedded ICC Profile'
+        iccProfile: profileName ?? 'Embedded ICC Profile',
       };
     }
   } else if (colorType === 'nclx') {
@@ -151,9 +159,7 @@ function parseColr(reader: BufferReader, size: number): {
 /**
  * Parse AVIF box structure
  */
-function parseBox(
-  reader: BufferReader
-): { type: string; size: number; dataOffset: number } | null {
+function parseBox(reader: BufferReader): { type: string; size: number; dataOffset: number } | null {
   const boxStart = reader.getPosition();
 
   if (!reader.canRead(8)) {

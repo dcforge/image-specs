@@ -9,6 +9,13 @@ import { ImageSpecsError } from '../src/types.js';
 vi.mock('http');
 vi.mock('https');
 
+// Create a proper mock response type that extends Readable with HTTP response properties
+interface MockResponse extends Readable {
+  statusCode?: number;
+  statusMessage?: string;
+  headers?: Record<string, string | string[]>;
+}
+
 describe('HTTP Utilities', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -16,7 +23,7 @@ describe('HTTP Utilities', () => {
 
   describe('fetchImageHeaders', () => {
     it('should fetch image from HTTP URL', async () => {
-      const mockResponse = new Readable();
+      const mockResponse = new Readable() as MockResponse;
       mockResponse.statusCode = 200;
       mockResponse.statusMessage = 'OK';
       mockResponse.headers = { 'content-type': 'image/jpeg' };
@@ -26,10 +33,13 @@ describe('HTTP Utilities', () => {
         end: vi.fn(),
       };
 
-      vi.mocked(http.request).mockImplementation((options, callback) => {
-        setTimeout(() => callback?.(mockResponse as any), 0);
+      vi.mocked(http.request).mockImplementation(((...args: any[]) => {
+        const callback = args[args.length - 1];
+        if (typeof callback === 'function') {
+          setTimeout(() => callback(mockResponse as any), 0);
+        }
         return mockRequest as any;
-      });
+      }) as any);
 
       const promise = fetchImageHeaders('http://example.com/image.jpg');
 
@@ -46,7 +56,7 @@ describe('HTTP Utilities', () => {
     });
 
     it('should fetch image from HTTPS URL', async () => {
-      const mockResponse = new Readable();
+      const mockResponse = new Readable() as MockResponse;
       mockResponse.statusCode = 200;
       mockResponse.headers = { 'content-type': 'image/png' };
 
@@ -55,10 +65,13 @@ describe('HTTP Utilities', () => {
         end: vi.fn(),
       };
 
-      vi.mocked(https.request).mockImplementation((options, callback) => {
-        setTimeout(() => callback?.(mockResponse as any), 0);
+      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
+        const callback = args[args.length - 1];
+        if (typeof callback === 'function') {
+          setTimeout(() => callback(mockResponse as any), 0);
+        }
         return mockRequest as any;
-      });
+      }) as any);
 
       const promise = fetchImageHeaders('https://example.com/image.png');
 
@@ -73,11 +86,11 @@ describe('HTTP Utilities', () => {
     });
 
     it('should handle redirects', async () => {
-      const redirectResponse = new Readable();
+      const redirectResponse = new Readable() as MockResponse;
       redirectResponse.statusCode = 302;
       redirectResponse.headers = { location: 'https://redirect.com/image.jpg' };
 
-      const finalResponse = new Readable();
+      const finalResponse = new Readable() as MockResponse;
       finalResponse.statusCode = 200;
       finalResponse.headers = { 'content-type': 'image/jpeg' };
 
@@ -87,15 +100,18 @@ describe('HTTP Utilities', () => {
       };
 
       let requestCount = 0;
-      vi.mocked(https.request).mockImplementation((options, callback) => {
+      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
         requestCount++;
-        if (requestCount === 1) {
-          setTimeout(() => callback?.(redirectResponse as any), 0);
-        } else {
-          setTimeout(() => callback?.(finalResponse as any), 0);
+        const callback = args[args.length - 1];
+        if (typeof callback === 'function') {
+          if (requestCount === 1) {
+            setTimeout(() => callback(redirectResponse as any), 0);
+          } else {
+            setTimeout(() => callback(finalResponse as any), 0);
+          }
         }
         return mockRequest as any;
-      });
+      }) as any);
 
       const promise = fetchImageHeaders('https://example.com/image.jpg');
 
@@ -108,7 +124,7 @@ describe('HTTP Utilities', () => {
     });
 
     it('should handle HTTP errors', async () => {
-      const mockResponse = new Readable();
+      const mockResponse = new Readable() as MockResponse;
       mockResponse.statusCode = 404;
       mockResponse.statusMessage = 'Not Found';
       mockResponse.headers = {}; // Add headers property
@@ -118,10 +134,13 @@ describe('HTTP Utilities', () => {
         end: vi.fn(),
       };
 
-      vi.mocked(https.request).mockImplementation((options, callback) => {
-        setTimeout(() => callback?.(mockResponse as any), 0);
+      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
+        const callback = args[args.length - 1];
+        if (typeof callback === 'function') {
+          setTimeout(() => callback(mockResponse as any), 0);
+        }
         return mockRequest as any;
-      });
+      }) as any);
 
       await expect(fetchImageHeaders('https://example.com/notfound.jpg')).rejects.toThrow(
         ImageSpecsError
@@ -169,7 +188,7 @@ describe('HTTP Utilities', () => {
     });
 
     it('should use custom options', async () => {
-      const mockResponse = new Readable();
+      const mockResponse = new Readable() as MockResponse;
       mockResponse.statusCode = 200;
       mockResponse.headers = {};
 
@@ -178,7 +197,9 @@ describe('HTTP Utilities', () => {
         end: vi.fn(),
       };
 
-      vi.mocked(https.request).mockImplementation((options, callback) => {
+      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
+        const options = args[0];
+        const callback = args[args.length - 1];
         expect(options).toMatchObject({
           headers: expect.objectContaining({
             'User-Agent': 'custom-agent',
@@ -186,9 +207,11 @@ describe('HTTP Utilities', () => {
           }),
           timeout: 5000,
         });
-        setTimeout(() => callback?.(mockResponse as any), 0);
+        if (typeof callback === 'function') {
+          setTimeout(() => callback(mockResponse as any), 0);
+        }
         return mockRequest as any;
-      });
+      }) as any);
 
       const promise = fetchImageHeaders('https://example.com/image.jpg', {
         timeout: 5000,
@@ -204,7 +227,7 @@ describe('HTTP Utilities', () => {
     });
 
     it('should include Range header for partial content', async () => {
-      const mockResponse = new Readable();
+      const mockResponse = new Readable() as MockResponse;
       mockResponse.statusCode = 206; // Partial content
       mockResponse.headers = { 'content-range': 'bytes 0-65535/100000' };
 
@@ -213,15 +236,19 @@ describe('HTTP Utilities', () => {
         end: vi.fn(),
       };
 
-      vi.mocked(https.request).mockImplementation((options, callback) => {
+      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
+        const options = args[0];
+        const callback = args[args.length - 1];
         expect(options).toMatchObject({
           headers: expect.objectContaining({
             Range: expect.stringMatching(/^bytes=0-\d+$/),
           }),
         });
-        setTimeout(() => callback?.(mockResponse as any), 0);
+        if (typeof callback === 'function') {
+          setTimeout(() => callback(mockResponse as any), 0);
+        }
         return mockRequest as any;
-      });
+      }) as any);
 
       const promise = fetchImageHeaders('https://example.com/image.jpg');
 
@@ -233,7 +260,7 @@ describe('HTTP Utilities', () => {
     });
 
     it('should accept 200 response for full content', async () => {
-      const mockResponse = new Readable();
+      const mockResponse = new Readable() as MockResponse;
       mockResponse.statusCode = 200;
       mockResponse.headers = {};
 
@@ -242,10 +269,13 @@ describe('HTTP Utilities', () => {
         end: vi.fn(),
       };
 
-      vi.mocked(https.request).mockImplementation((options, callback) => {
-        setTimeout(() => callback?.(mockResponse as any), 0);
+      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
+        const callback = args[args.length - 1];
+        if (typeof callback === 'function') {
+          setTimeout(() => callback(mockResponse as any), 0);
+        }
         return mockRequest as any;
-      });
+      }) as any);
 
       const promise = fetchImageHeaders('https://example.com/image.jpg');
 

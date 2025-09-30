@@ -196,9 +196,7 @@ export async function getImageSpecs(
 export async function getImageSpecsBatch(
   sources: ImageSource[],
   options: ImageSpecsOptions = {}
-): Promise<
-  ({ success: true; specs: ImageSpecs } | { success: false; error: ImageSpecsError })[]
-> {
+): Promise<({ success: true; specs: ImageSpecs } | { success: false; error: ImageSpecsError })[]> {
   const promises = sources.map(async (source, index) => {
     try {
       const specs = await getImageSpecs(source, options);

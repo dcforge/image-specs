@@ -4,7 +4,7 @@
 export class BufferReader {
   private readonly buffer: Buffer;
   private position = 0;
-  private readonly littleEndian = false;
+  private readonly littleEndian: boolean;
 
   constructor(buffer: Buffer, littleEndian = false) {
     this.buffer = buffer;
@@ -82,7 +82,9 @@ export class BufferReader {
    */
   readNullTerminatedString(maxLength?: number, encoding: BufferEncoding = 'utf8'): string {
     const start = this.position;
-    const max = maxLength ? Math.min(this.position + maxLength, this.buffer.length) : this.buffer.length;
+    const max = maxLength
+      ? Math.min(this.position + maxLength, this.buffer.length)
+      : this.buffer.length;
 
     let end = start;
     while (end < max && this.buffer[end] !== 0) {

@@ -2,23 +2,24 @@
 
 'documentation':
   - changed-files:
-    - any-glob-to-any-file: ['**/*.md', 'docs/**/*']
+      - any-glob-to-any-file: ['**/*.md', 'docs/**/*']
 
 'tests':
   - changed-files:
-    - any-glob-to-any-file: ['tests/**/*', '**/*.test.ts', '**/*.spec.ts']
+      - any-glob-to-any-file: ['tests/**/*', '**/*.test.ts', '**/*.spec.ts']
 
 'dependencies':
   - changed-files:
-    - any-glob-to-any-file: ['package.json', 'package-lock.json']
+      - any-glob-to-any-file: ['package.json', 'package-lock.json']
 
 'ci':
   - changed-files:
-    - any-glob-to-any-file: ['.github/**/*']
+      - any-glob-to-any-file: ['.github/**/*']
 
 'configuration':
   - changed-files:
-    - any-glob-to-any-file: ['*.config.{js,ts,mjs,cjs}', 'tsconfig.json', '.eslintrc*', '.prettierrc*']
+      - any-glob-to-any-file:
+          ['*.config.{js,ts,mjs,cjs}', 'tsconfig.json', '.eslintrc*', '.prettierrc*']
 
 'bug':
   - head-branch: ['^fix/', 'fix-']
@@ -40,4 +41,4 @@
 
 'cli':
   - changed-files:
-    - any-glob-to-any-file: ['src/cli.ts', 'dist/cli.js']
+      - any-glob-to-any-file: ['src/cli.ts', 'dist/cli.js']
