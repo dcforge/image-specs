@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Readable } from 'stream';
-import {
-  readStreamWithTimeout,
-  toReadableStream,
-  isValidStream,
-} from '../src/stream.js';
+import { readStreamWithTimeout, toReadableStream, isValidStream } from '../src/stream.js';
 import { ImageSpecsError, ErrorCodes } from '../src/types.js';
 
 describe('Stream Utilities', () => {
@@ -144,5 +140,4 @@ describe('Stream Utilities', () => {
       expect(isValidStream('string')).toBe(false);
     });
   });
-
 });

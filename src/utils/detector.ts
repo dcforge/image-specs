@@ -19,11 +19,7 @@ interface DetectorEntry {
 /**
  * Check if buffer matches signature at offset
  */
-function matchesSignature(
-  buffer: Buffer,
-  signature: number[] | Buffer,
-  offset = 0
-): boolean {
+function matchesSignature(buffer: Buffer, signature: number[] | Buffer, offset = 0): boolean {
   if (offset + signature.length > buffer.length) {
     return false;
   }
@@ -39,17 +35,14 @@ function matchesSignature(
   return true;
 }
 
-
 /**
  * JPEG detector - checks for SOI marker (0xFFD8)
  */
 const jpegDetector: DetectorEntry = {
   parser: parseJPEG,
   validate: (buffer: Buffer) => {
-    return buffer.length >= 2 &&
-           buffer[0] === 0xFF &&
-           buffer[1] === 0xD8;
-  }
+    return buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xd8;
+  },
 };
 
 /**
@@ -58,8 +51,8 @@ const jpegDetector: DetectorEntry = {
 const pngDetector: DetectorEntry = {
   parser: parsePNG,
   validate: (buffer: Buffer) => {
-    return matchesSignature(buffer, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-  }
+    return matchesSignature(buffer, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  },
 };
 
 /**
@@ -71,7 +64,7 @@ const gifDetector: DetectorEntry = {
     if (buffer.length < 6) return false;
     const sig = buffer.subarray(0, 6).toString('ascii');
     return sig === 'GIF87a' || sig === 'GIF89a';
-  }
+  },
 };
 
 /**
@@ -80,10 +73,12 @@ const gifDetector: DetectorEntry = {
 const webpDetector: DetectorEntry = {
   parser: parseWebP,
   validate: (buffer: Buffer) => {
-    return buffer.length >= 12 &&
-           matchesSignature(buffer, Buffer.from('RIFF'), 0) &&
-           matchesSignature(buffer, Buffer.from('WEBP'), 8);
-  }
+    return (
+      buffer.length >= 12 &&
+      matchesSignature(buffer, Buffer.from('RIFF'), 0) &&
+      matchesSignature(buffer, Buffer.from('WEBP'), 8)
+    );
+  },
 };
 
 /**
@@ -92,10 +87,12 @@ const webpDetector: DetectorEntry = {
 const bmpDetector: DetectorEntry = {
   parser: parseBMP,
   validate: (buffer: Buffer) => {
-    return buffer.length >= 2 &&
-           buffer[0] === 0x42 && // 'B'
-           buffer[1] === 0x4D;    // 'M'
-  }
+    return (
+      buffer.length >= 2 &&
+      buffer[0] === 0x42 && // 'B'
+      buffer[1] === 0x4d
+    ); // 'M'
+  },
 };
 
 /**
@@ -104,12 +101,14 @@ const bmpDetector: DetectorEntry = {
 const icoDetector: DetectorEntry = {
   parser: parseICO,
   validate: (buffer: Buffer) => {
-    return buffer.length >= 4 &&
-           buffer[0] === 0x00 &&
-           buffer[1] === 0x00 &&
-           buffer[2] === 0x01 &&
-           buffer[3] === 0x00;
-  }
+    return (
+      buffer.length >= 4 &&
+      buffer[0] === 0x00 &&
+      buffer[1] === 0x00 &&
+      buffer[2] === 0x01 &&
+      buffer[3] === 0x00
+    );
+  },
 };
 
 /**
@@ -130,7 +129,7 @@ const avifDetector: DetectorEntry = {
     const brandsStr = brandsSection.toString('ascii');
 
     return brandsStr.includes('avif') || brandsStr.includes('avis');
-  }
+  },
 };
 
 /**
@@ -150,7 +149,7 @@ const svgDetector: DetectorEntry = {
     if (str.includes('<!DOCTYPE svg')) return true;
 
     return false;
-  }
+  },
 };
 
 /**
@@ -184,7 +183,7 @@ export function detectFormat(buffer: Buffer): Parser | null {
  * Get all parsers in order (for fallback)
  */
 export function getAllParsers(): readonly Parser[] {
-  return detectors.map(d => d.parser);
+  return detectors.map((d) => d.parser);
 }
 
 /**
@@ -199,8 +198,8 @@ export function mightBeImage(buffer: Buffer): boolean {
 
   // Common first bytes of images
   switch (firstByte) {
-    case 0xFF: // JPEG
-      return secondByte === 0xD8;
+    case 0xff: // JPEG
+      return secondByte === 0xd8;
     case 0x89: // PNG
       return secondByte === 0x50;
     case 0x47: // GIF ('G')
@@ -208,10 +207,10 @@ export function mightBeImage(buffer: Buffer): boolean {
     case 0x52: // RIFF/WebP ('R')
       return secondByte === 0x49; // 'I'
     case 0x42: // BMP ('B')
-      return secondByte === 0x4D; // 'M'
+      return secondByte === 0x4d; // 'M'
     case 0x00: // ICO or AVIF
       return true; // Need more bytes to determine
-    case 0x3C: // '<' - Possibly SVG
+    case 0x3c: // '<' - Possibly SVG
       return true;
     default:
       // Check for AVIF (starts with size + 'ftyp')

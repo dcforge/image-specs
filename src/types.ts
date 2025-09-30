@@ -10,9 +10,9 @@ function getPackageVersion(): string {
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    const packageJson = JSON.parse(
-      readFileSync(join(__dirname, '../package.json'), 'utf-8')
-    ) as { version: string };
+    const packageJson = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8')) as {
+      version: string;
+    };
     return packageJson.version;
   } catch {
     // Fallback for environments where package.json is not accessible

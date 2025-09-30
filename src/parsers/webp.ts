@@ -50,7 +50,9 @@ function parseVP8L(reader: BufferReader): { width: number; height: number } | nu
 /**
  * Parse WebP VP8X chunk
  */
-function parseVP8X(reader: BufferReader): { width: number; height: number; hasICC?: boolean; hasAlpha?: boolean } | null {
+function parseVP8X(
+  reader: BufferReader
+): { width: number; height: number; hasICC?: boolean; hasAlpha?: boolean } | null {
   if (!reader.canRead(10)) {
     return null;
   }
@@ -59,7 +61,7 @@ function parseVP8X(reader: BufferReader): { width: number; height: number; hasIC
   const flags = reader.readUInt8();
 
   // Extract flag bits
-  const hasICC = (flags & 0x20) !== 0;  // Bit 5: ICC profile
+  const hasICC = (flags & 0x20) !== 0; // Bit 5: ICC profile
   const hasAlpha = (flags & 0x10) !== 0; // Bit 4: Alpha channel
 
   // Skip reserved bits (3 bytes)
@@ -70,8 +72,10 @@ function parseVP8X(reader: BufferReader): { width: number; height: number; hasIC
   const heightBytes = reader.readBytes(3);
 
   // Convert 3-byte little-endian to number and add 1
-  const width = ((widthBytes[0] ?? 0) | ((widthBytes[1] ?? 0) << 8) | ((widthBytes[2] ?? 0) << 16)) + 1;
-  const height = ((heightBytes[0] ?? 0) | ((heightBytes[1] ?? 0) << 8) | ((heightBytes[2] ?? 0) << 16)) + 1;
+  const width =
+    ((widthBytes[0] ?? 0) | ((widthBytes[1] ?? 0) << 8) | ((widthBytes[2] ?? 0) << 16)) + 1;
+  const height =
+    ((heightBytes[0] ?? 0) | ((heightBytes[1] ?? 0) << 8) | ((heightBytes[2] ?? 0) << 16)) + 1;
 
   return { width, height, hasICC, hasAlpha };
 }
@@ -206,7 +210,10 @@ export function parseWebP(buffer: Buffer): ParseResult | null {
 
                   if (asciiLength > 0 && descOffset + 12 + asciiLength <= profileData.length) {
                     // Read ASCII string (null-terminated)
-                    const nameBytes = profileData.subarray(descOffset + 12, descOffset + 12 + asciiLength);
+                    const nameBytes = profileData.subarray(
+                      descOffset + 12,
+                      descOffset + 12 + asciiLength
+                    );
                     iccProfileName = nameBytes.toString('ascii').replace(/\0/g, '').trim();
                   }
                 }
@@ -245,18 +252,31 @@ export function parseWebP(buffer: Buffer): ParseResult | null {
               const startSearch = descIndex + 12; // Skip 'desc' tag and some header bytes
               if (startSearch < profileData.length - 20) {
                 // Find the first readable ASCII sequence
-                for (let i = startSearch; i < Math.min(startSearch + 200, profileData.length - 1); i++) {
+                for (
+                  let i = startSearch;
+                  i < Math.min(startSearch + 200, profileData.length - 1);
+                  i++
+                ) {
                   const byte = profileData[i] ?? 0;
                   // Look for printable ASCII characters
                   if (byte >= 32 && byte <= 126) {
                     // Found start of text, read until non-printable
                     let endPos = i;
-                    while (endPos < profileData.length && (profileData[endPos] ?? 0) >= 32 && (profileData[endPos] ?? 0) <= 126) {
+                    while (
+                      endPos < profileData.length &&
+                      (profileData[endPos] ?? 0) >= 32 &&
+                      (profileData[endPos] ?? 0) <= 126
+                    ) {
                       endPos++;
                     }
-                    if (endPos - i > 4) { // Minimum length for a meaningful name
+                    if (endPos - i > 4) {
+                      // Minimum length for a meaningful name
                       const possibleName = profileData.toString('ascii', i, endPos).trim();
-                      if (possibleName && !possibleName.includes('text') && !possibleName.includes('Copyright')) {
+                      if (
+                        possibleName &&
+                        !possibleName.includes('text') &&
+                        !possibleName.includes('Copyright')
+                      ) {
                         iccProfileName = possibleName;
                         colorSpace = getColorSpaceFromString(possibleName);
                         break;

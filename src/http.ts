@@ -101,43 +101,45 @@ export async function fetchImageHeaders(
       const { statusCode = 0, headers } = response;
 
       // Handle redirects
-      void handleRedirect(
-        statusCode,
-        headers.location,
-        url,
-        opts,
-        fetchImageHeaders
-      ).then((redirectResult) => {
-        if (redirectResult) {
-          resolve(redirectResult);
-          return;
-        }
+      void handleRedirect(statusCode, headers.location, url, opts, fetchImageHeaders)
+        .then((redirectResult) => {
+          if (redirectResult) {
+            resolve(redirectResult);
+            return;
+          }
 
-        // Accept both 200 (full content) and 206 (partial content)
-        if (statusCode !== 200 && statusCode !== 206) {
+          // Accept both 200 (full content) and 206 (partial content)
+          if (statusCode !== 200 && statusCode !== 206) {
+            reject(
+              new ImageSpecsError(
+                `HTTP ${statusCode}: ${response.statusMessage ?? 'Unknown error'}`,
+                ErrorCodes.NETWORK_ERROR
+              )
+            );
+            return;
+          }
+
+          // No response-level timeout - let stream reading handle timeouts
+          response.on('error', (error: Error) => {
+            reject(
+              new ImageSpecsError(`Response error: ${error.message}`, ErrorCodes.NETWORK_ERROR)
+            );
+          });
+
+          resolve({
+            stream: response,
+            headers,
+            statusCode,
+            url,
+          });
+        })
+        .catch((error: unknown) => {
           reject(
-            new ImageSpecsError(
-              `HTTP ${statusCode}: ${response.statusMessage ?? 'Unknown error'}`,
-              ErrorCodes.NETWORK_ERROR
-            )
+            error instanceof Error
+              ? error
+              : new ImageSpecsError(String(error), ErrorCodes.NETWORK_ERROR)
           );
-          return;
-        }
-
-        // No response-level timeout - let stream reading handle timeouts
-        response.on('error', (error: Error) => {
-          reject(new ImageSpecsError(`Response error: ${error.message}`, ErrorCodes.NETWORK_ERROR));
         });
-
-        resolve({
-          stream: response,
-          headers,
-          statusCode,
-          url,
-        });
-      }).catch((error: unknown) => {
-        reject(error instanceof Error ? error : new ImageSpecsError(String(error), ErrorCodes.NETWORK_ERROR));
-      });
     });
 
     request.on('error', (error: Error) => {
@@ -152,4 +154,3 @@ export async function fetchImageHeaders(
     request.end();
   });
 }
-

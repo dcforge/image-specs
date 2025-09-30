@@ -24,9 +24,10 @@ interface CliOptions extends ImageSpecsOptions {
  */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const packageJson = JSON.parse(
-  readFileSync(join(__dirname, '../package.json'), 'utf-8')
-) as { name: string; version: string };
+const packageJson = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8')) as {
+  name: string;
+  version: string;
+};
 const PACKAGE_VERSION = packageJson.version;
 const PACKAGE_NAME = packageJson.name;
 
@@ -154,7 +155,9 @@ async function getImageSource(input: string): Promise<ImageSource> {
   }
 }
 
-type BatchResult = { success: true; specs: ImageSpecs } | { success: false; error: ImageSpecsError };
+type BatchResult =
+  | { success: true; specs: ImageSpecs }
+  | { success: false; error: ImageSpecsError };
 
 /**
  * Format single ImageSpecs output

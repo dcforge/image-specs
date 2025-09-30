@@ -48,13 +48,10 @@ function isSOFMarker(marker: number): boolean {
   );
 }
 
-
 /**
  * Parse JFIF app0 segment for resolution information
  */
-function parseJFIF(
-  reader: BufferReader
-): { wResolution?: number; hResolution?: number } {
+function parseJFIF(reader: BufferReader): { wResolution?: number; hResolution?: number } {
   // JFIF identifier should be "JFIF\0"
   if (!reader.canRead(14) || reader.readString(5) !== 'JFIF\0') {
     return {};
@@ -87,7 +84,6 @@ function parseEXIF(
   reader: BufferReader,
   _segmentLength: number
 ): { wResolution?: number; hResolution?: number } {
-
   // Check for EXIF identifier
   if (!reader.canRead(6) || reader.readString(6) !== 'Exif\0\0') {
     return {};

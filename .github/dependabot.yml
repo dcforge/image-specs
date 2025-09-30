@@ -1,47 +1,47 @@
 version: 2
 updates:
   # Enable npm dependency updates
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: 'npm'
+    directory: '/'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "03:00"
+      interval: 'weekly'
+      day: 'monday'
+      time: '03:00'
     open-pull-requests-limit: 10
     assignees:
-      - "rgdcastro"
+      - 'rgdcastro'
     commit-message:
-      prefix: "chore(deps)"
-      include: "scope"
+      prefix: 'chore(deps)'
+      include: 'scope'
     labels:
-      - "dependencies"
-      - "automated"
+      - 'dependencies'
+      - 'automated'
     # Group dependencies by type
     groups:
       production-dependencies:
-        dependency-type: "production"
+        dependency-type: 'production'
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
       development-dependencies:
-        dependency-type: "development"
+        dependency-type: 'development'
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
     ignore:
       # Ignore major version updates for stable dependencies
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
 
   # Enable GitHub Actions dependency updates
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: 'github-actions'
+    directory: '/'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "03:00"
+      interval: 'weekly'
+      day: 'monday'
+      time: '03:00'
     commit-message:
-      prefix: "chore(ci)"
+      prefix: 'chore(ci)'
     labels:
-      - "ci"
-      - "automated"
+      - 'ci'
+      - 'automated'
