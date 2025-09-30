@@ -4,7 +4,7 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { getImageSpecs, getImageSpecsBatch, isImageSource, ImageSpecsError } from './index.js';
-import type { ImageSpecsOptions, ImageSource } from './types.js';
+import type { ImageSpecs, ImageSpecsOptions, ImageSource } from './types.js';
 
 /**
  * CLI configuration
@@ -154,71 +154,81 @@ async function getImageSource(input: string): Promise<ImageSource> {
   }
 }
 
+type BatchResult = { success: true; specs: ImageSpecs } | { success: false; error: ImageSpecsError };
+
 /**
- * Format output based on options
+ * Format single ImageSpecs output
  */
-function formatOutput(data: any, options: CliOptions): string {
+function formatSingleSpecs(specs: ImageSpecs, options: CliOptions): string {
+  let output = `${specs.width}x${specs.height} ${specs.type} (${specs.mime})`;
+
+  if (options.verbose) {
+    output += `\n  Units: ${specs.wUnits} x ${specs.hUnits}`;
+    if (specs.wResolution ?? specs.hResolution) {
+      output += `\n  Resolution: ${specs.wResolution ?? 'N/A'} x ${specs.hResolution ?? 'N/A'} DPI`;
+    }
+    if (specs.colorSpace) {
+      output += `\n  Color Space: ${specs.colorSpace}`;
+    }
+    if (specs.iccProfile) {
+      output += `\n  ICC Profile: ${specs.iccProfile}`;
+    }
+    if (specs.bitDepth) {
+      output += `\n  Bit Depth: ${specs.bitDepth}`;
+    }
+    if (specs.channels) {
+      output += `\n  Channels: ${specs.channels}`;
+    }
+    if (specs.gamma) {
+      output += `\n  Gamma: ${specs.gamma}`;
+    }
+    if (specs.url) {
+      output += `\n  URL: ${specs.url}`;
+    }
+    if (specs.path) {
+      output += `\n  Path: ${specs.path}`;
+    }
+    if (specs.filename) {
+      output += `\n  Filename: ${specs.filename}`;
+    }
+  }
+
+  return output;
+}
+
+/**
+ * Format batch results output
+ */
+function formatBatchResults(results: BatchResult[], options: CliOptions): string {
+  if (options.json) {
+    return JSON.stringify(results, null, 2);
+  }
+
+  return results
+    .map((result, index) => {
+      if (result.success) {
+        const specs = result.specs;
+        return `[${index}] ${specs.width}x${specs.height} ${specs.type} (${specs.mime})${specs.url ? ` - ${specs.url}` : ''}`;
+      } else {
+        return `[${index}] Error: ${result.error.message}`;
+      }
+    })
+    .join('\n');
+}
+
+/**
+ * Format boolean or boolean array output
+ */
+function formatBooleanOutput(data: boolean | boolean[], options: CliOptions): string {
   if (options.json) {
     return JSON.stringify(data, null, 2);
   }
 
-  if (options.check) {
-    return data ? 'true' : 'false';
-  }
-
   if (Array.isArray(data)) {
-    return data
-      .map((result, index) => {
-        if (result.success) {
-          const specs = result.specs;
-          return `[${index}] ${specs.width}x${specs.height} ${specs.type} (${specs.mime})${specs.url ? ` - ${specs.url}` : ''}`;
-        } else {
-          return `[${index}] Error: ${result.error.message}`;
-        }
-      })
-      .join('\n');
+    return data.map((val, idx) => `[${idx}] ${val}`).join('\n');
   }
 
-  // Single result
-  if (typeof data === 'object' && data.width && data.height) {
-    const specs = data;
-    let output = `${specs.width}x${specs.height} ${specs.type} (${specs.mime})`;
-
-    if (options.verbose) {
-      output += `\n  Units: ${specs.wUnits} x ${specs.hUnits}`;
-      if (specs.wResolution || specs.hResolution) {
-        output += `\n  Resolution: ${specs.wResolution || 'N/A'} x ${specs.hResolution || 'N/A'} DPI`;
-      }
-      if (specs.colorSpace) {
-        output += `\n  Color Space: ${specs.colorSpace}`;
-      }
-      if (specs.iccProfile) {
-        output += `\n  ICC Profile: ${specs.iccProfile}`;
-      }
-      if (specs.bitDepth) {
-        output += `\n  Bit Depth: ${specs.bitDepth}`;
-      }
-      if (specs.channels) {
-        output += `\n  Channels: ${specs.channels}`;
-      }
-      if (specs.gamma) {
-        output += `\n  Gamma: ${specs.gamma}`;
-      }
-      if (specs.url) {
-        output += `\n  URL: ${specs.url}`;
-      }
-      if (specs.path) {
-        output += `\n  Path: ${specs.path}`;
-      }
-      if (specs.filename) {
-        output += `\n  Filename: ${specs.filename}`;
-      }
-    }
-
-    return output;
-  }
-
-  return String(data);
+  return data ? 'true' : 'false';
 }
 
 /**
@@ -243,12 +253,12 @@ async function main(): Promise<void> {
 
     // Handle help and version
     if (options.help) {
-      console.log(HELP_TEXT);
+      process.stdout.write(`${HELP_TEXT}\n`);
       process.exit(0);
     }
 
     if (options.version) {
-      console.log(PACKAGE_VERSION);
+      process.stdout.write(`${PACKAGE_VERSION}\n`);
       process.exit(0);
     }
 
@@ -266,22 +276,29 @@ async function main(): Promise<void> {
         const results = await Promise.all(
           imageSources.map((source) => isImageSource(source, options))
         );
-        console.log(formatOutput(results, options));
+        process.stdout.write(`${formatBooleanOutput(results, options)}\n`);
       } else {
         const results = await getImageSpecsBatch(imageSources, options);
-        console.log(formatOutput(results, options));
+        process.stdout.write(`${formatBatchResults(results, options)}\n`);
       }
     } else {
       // Single source processing
-      const source = sources[0]!; // Safe: checked sources.length > 0 above
+      const source = sources[0];
+      if (!source) {
+        throw new Error('No sources provided. Use --help for usage information.');
+      }
       const imageSource = await getImageSource(source);
 
       if (options.check) {
         const result = await isImageSource(imageSource, options);
-        console.log(formatOutput(result, options));
+        process.stdout.write(`${formatBooleanOutput(result, options)}\n`);
       } else {
         const specs = await getImageSpecs(imageSource, options);
-        console.log(formatOutput(specs, options));
+        if (options.json) {
+          process.stdout.write(`${JSON.stringify(specs, null, 2)}\n`);
+        } else {
+          process.stdout.write(`${formatSingleSpecs(specs, options)}\n`);
+        }
       }
     }
   } catch (error) {

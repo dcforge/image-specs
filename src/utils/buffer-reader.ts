@@ -4,7 +4,7 @@
 export class BufferReader {
   private readonly buffer: Buffer;
   private position = 0;
-  private readonly littleEndian = false;
+  private readonly littleEndian: boolean;
 
   constructor(buffer: Buffer, littleEndian = false) {
     this.buffer = buffer;
