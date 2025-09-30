@@ -1,0 +1,110 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  # Validate PR title follows conventional commits
+  pr-title:
+    name: Validate PR Title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}"
+            must start with a lowercase character.
+          wip: false
+          validateSingleCommit: false
+
+  # Check PR size
+  pr-size:
+    name: Check PR Size
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check changed files
+        id: files
+        run: |
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
+          echo "changed-files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "Changed files: $CHANGED_FILES"
+
+      - name: Calculate additions and deletions
+        id: diff
+        run: |
+          git diff --shortstat origin/${{ github.base_ref }}...HEAD > diff.txt
+          cat diff.txt
+          ADDITIONS=$(cat diff.txt | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo "0")
+          DELETIONS=$(cat diff.txt | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo "0")
+          TOTAL=$((ADDITIONS + DELETIONS))
+          echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
+          echo "deletions=$DELETIONS" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+      - name: Comment on large PR
+        if: steps.diff.outputs.total > 500
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const total = ${{ steps.diff.outputs.total }};
+            const files = ${{ steps.files.outputs.changed-files }};
+
+            const message = `## ⚠️ Large PR Detected
+
+            This PR modifies **${total} lines** across **${files} files**.
+
+            Consider:
+            - Breaking this into smaller, focused PRs
+            - Separating refactoring from feature changes
+            - Splitting test changes from implementation
+
+            Smaller PRs are easier to review and less likely to introduce bugs.`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });
+
+  # Label PR based on changes
+  pr-labeler:
+    name: Label PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Apply labels
+        uses: actions/labeler@v5
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          configuration-path: .github/labeler.yml
+          sync-labels: true

@@ -1,0 +1,3 @@
+# Full validation before pushing to remote
+echo "Running full build and test suite..."
+npm run build && npm test

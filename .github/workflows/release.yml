@@ -1,0 +1,274 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release-type:
+        description: 'Release type (major, minor, patch, or semver like 1.2.3)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+# Prevent concurrent releases
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # Analyze commits to determine if a release is needed
+  analyze:
+    name: Analyze Commits
+    runs-on: ubuntu-latest
+    outputs:
+      should-release: ${{ steps.analyze.outputs.should-release }}
+      release-type: ${{ steps.analyze.outputs.release-type }}
+      new-version: ${{ steps.analyze.outputs.new-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get latest release
+        id: latest-release
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest release: $LATEST_TAG"
+
+      - name: Analyze commits since last release
+        id: analyze
+        run: |
+          LATEST_TAG="${{ steps.latest-release.outputs.latest-tag }}"
+
+          # For workflow_dispatch, use the input
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should-release=true" >> $GITHUB_OUTPUT
+            echo "release-type=${{ inputs.release-type }}" >> $GITHUB_OUTPUT
+            echo "Manual release triggered: ${{ inputs.release-type }}"
+            exit 0
+          fi
+
+          # Get commits since last tag
+          COMMITS=$(git log ${LATEST_TAG}..HEAD --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+
+          if [ -z "$COMMITS" ]; then
+            echo "should-release=false" >> $GITHUB_OUTPUT
+            echo "No new commits since last release"
+            exit 0
+          fi
+
+          # Analyze commits using conventional commits format
+          HAS_BREAKING=false
+          HAS_FEAT=false
+          HAS_FIX=false
+
+          while IFS= read -r commit; do
+            # Check for breaking changes
+            if echo "$commit" | grep -qiE "^(BREAKING CHANGE|[a-z]+(\([a-z]+\))?!:)"; then
+              HAS_BREAKING=true
+            fi
+
+            # Check for features
+            if echo "$commit" | grep -qiE "^feat(\([a-z]+\))?:"; then
+              HAS_FEAT=true
+            fi
+
+            # Check for fixes
+            if echo "$commit" | grep -qiE "^fix(\([a-z]+\))?:"; then
+              HAS_FIX=true
+            fi
+          done <<< "$COMMITS"
+
+          # Determine release type based on conventional commits
+          RELEASE_TYPE="none"
+          if [ "$HAS_BREAKING" = true ]; then
+            RELEASE_TYPE="major"
+          elif [ "$HAS_FEAT" = true ]; then
+            RELEASE_TYPE="minor"
+          elif [ "$HAS_FIX" = true ]; then
+            RELEASE_TYPE="patch"
+          fi
+
+          if [ "$RELEASE_TYPE" != "none" ]; then
+            echo "should-release=true" >> $GITHUB_OUTPUT
+            echo "release-type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
+            echo "Release needed: $RELEASE_TYPE"
+          else
+            echo "should-release=false" >> $GITHUB_OUTPUT
+            echo "No releasable commits found (use conventional commits: feat:, fix:, BREAKING CHANGE:)"
+          fi
+
+  release:
+    name: Create Release
+    needs: [analyze]
+    if: needs.analyze.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.new-version }}
+      tag: ${{ steps.version.outputs.new-tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        id: version
+        run: |
+          RELEASE_TYPE="${{ needs.analyze.outputs.release-type }}"
+
+          # Get current version
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+
+          # Bump version
+          npm version $RELEASE_TYPE -m "chore(release): v%s [skip ci]" --no-git-tag-version
+
+          # Get new version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          NEW_TAG="v$NEW_VERSION"
+
+          echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "new-tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run CI checks
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run build
+          npm test -- --run
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          NEW_TAG="${{ steps.version.outputs.new-tag }}"
+
+          echo "# Release $NEW_TAG" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "## What's Changed" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+
+          if [ -n "$LATEST_TAG" ]; then
+            git log ${LATEST_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges >> CHANGELOG.md
+          else
+            git log --pretty=format:"- %s (%h)" --no-merges >> CHANGELOG.md
+          fi
+
+          echo "" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...$NEW_TAG" >> CHANGELOG.md
+
+          cat CHANGELOG.md
+
+      - name: Commit version bump
+        run: |
+          git add package.json package-lock.json
+          git commit -m "chore(release): v${{ steps.version.outputs.new-version }} [skip ci]"
+          git tag ${{ steps.version.outputs.new-tag }}
+
+      - name: Push changes
+        run: |
+          git push origin main
+          git push origin ${{ steps.version.outputs.new-tag }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.new-tag }}
+          name: Release ${{ steps.version.outputs.new-tag }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish to npm
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      - name: Verify package contents
+        run: |
+          npm pack --dry-run
+          echo "Package contents verified"
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify npm publication
+        run: |
+          sleep 30  # Wait for npm registry to update
+          npm view image-specs@${{ needs.release.outputs.version }} version || exit 1
+          echo "✅ Package successfully published to npm"
+
+  notify:
+    name: Notify Release
+    needs: [release, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check status
+        run: |
+          if [ "${{ needs.release.result }}" = "success" ] && [ "${{ needs.publish.result }}" = "success" ]; then
+            echo "✅ Release ${{ needs.release.outputs.version }} completed successfully"
+          else
+            echo "❌ Release failed - check logs"
+            exit 1
+          fi

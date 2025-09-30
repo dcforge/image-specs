@@ -1,0 +1,43 @@
+# Labeler configuration for automatic PR labeling
+
+'documentation':
+  - changed-files:
+    - any-glob-to-any-file: ['**/*.md', 'docs/**/*']
+
+'tests':
+  - changed-files:
+    - any-glob-to-any-file: ['tests/**/*', '**/*.test.ts', '**/*.spec.ts']
+
+'dependencies':
+  - changed-files:
+    - any-glob-to-any-file: ['package.json', 'package-lock.json']
+
+'ci':
+  - changed-files:
+    - any-glob-to-any-file: ['.github/**/*']
+
+'configuration':
+  - changed-files:
+    - any-glob-to-any-file: ['*.config.{js,ts,mjs,cjs}', 'tsconfig.json', '.eslintrc*', '.prettierrc*']
+
+'bug':
+  - head-branch: ['^fix/', 'fix-']
+  - title: ['^fix:', '^fix\(']
+
+'feature':
+  - head-branch: ['^feat/', 'feature/']
+  - title: ['^feat:', '^feat\(']
+
+'refactor':
+  - head-branch: ['^refactor/']
+  - title: ['^refactor:', '^refactor\(']
+
+'performance':
+  - title: ['^perf:', '^perf\(']
+
+'breaking':
+  - title: ['BREAKING CHANGE', '!:']
+
+'cli':
+  - changed-files:
+    - any-glob-to-any-file: ['src/cli.ts', 'dist/cli.js']
