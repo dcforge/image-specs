@@ -166,19 +166,19 @@ Complete this checklist to ensure your CI/CD pipeline is fully configured and op
 - [ ] **Test npm package**
   ```bash
   # Wait 30 seconds for npm registry sync
-  npm view image-specs version
+  npm view @dcforge/image-specs version
 
   # Test installation
   mkdir -p /tmp/test && cd /tmp/test
   npm init -y
-  npm install image-specs
+  npm install @dcforge/image-specs
 
   # Test imports
-  node -e "import('image-specs').then(m => console.log('ESM:', typeof m.getImageSpecs))"
-  node -e "const m = require('image-specs'); console.log('CJS:', typeof m.getImageSpecs)"
+  node -e "import('@dcforge/image-specs').then(m => console.log('ESM:', typeof m.getImageSpecs))"
+  node -e "const m = require('@dcforge/image-specs'); console.log('CJS:', typeof m.getImageSpecs)"
 
   # Test CLI
-  npx image-specs --version
+  npx @dcforge/image-specs --version
   ```
 
 ### 9. Test Manual Release
@@ -210,10 +210,11 @@ Complete this checklist to ensure your CI/CD pipeline is fully configured and op
 
 - [ ] **Copy badge code:**
   ```markdown
-  [![CI](https://github.com/dcforge/image-specs/actions/workflows/ci.yml/badge.svg)](https://github.com/dcforge/image-specs/actions/workflows/ci.yml)
-  [![npm version](https://img.shields.io/npm/v/image-specs.svg)](https://www.npmjs.com/package/image-specs)
-  [![npm downloads](https://img.shields.io/npm/dm/image-specs.svg)](https://www.npmjs.com/package/image-specs)
-  [![codecov](https://codecov.io/gh/rgdcastro/image-specs/branch/main/graph/badge.svg)](https://codecov.io/gh/rgdcastro/image-specs)
+  [![npm version](https://badge.fury.io/js/@dcforge%2Fimage-specs.svg)](https://badge.fury.io/js/@dcforge%2Fimage-specs)
+  [![npm downloads](https://img.shields.io/npm/dm/@dcforge/image-specs.svg)](https://www.npmjs.com/package/@dcforge/image-specs)
+  [![Build Status](https://img.shields.io/github/actions/workflow/status/dcforge/image-specs/ci.yml?branch=main)](https://github.com/dcforge/image-specs/actions)
+  [![Coverage Status](https://img.shields.io/codecov/c/github/dcforge/image-specs/main.svg)](https://codecov.io/gh/dcforge/image-specs)
+  [![TypeScript](https://badges.frapsoft.com/typescript/love/typescript.svg?v=101)](https://github.com/ellerbrock/typescript-badges/)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
   ```
 

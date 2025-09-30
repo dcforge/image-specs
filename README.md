@@ -1,6 +1,9 @@
 # image-specs
 
-[![npm version](https://badge.fury.io/js/image-specs.svg)](https://badge.fury.io/js/@dcforge/image-specs)
+[![npm version](https://badge.fury.io/js/@dcforge%2Fimage-specs.svg)](https://badge.fury.io/js/@dcforge%2Fimage-specs)
+[![npm downloads](https://img.shields.io/npm/dm/@dcforge/image-specs.svg)](https://www.npmjs.com/package/@dcforge/image-specs)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/dcforge/image-specs/ci.yml?branch=main)](https://github.com/dcforge/image-specs/actions)
+[![Coverage Status](https://img.shields.io/codecov/c/github/dcforge/image-specs/main.svg)](https://codecov.io/gh/dcforge/image-specs)
 [![TypeScript](https://badges.frapsoft.com/typescript/love/typescript.svg?v=101)](https://github.com/ellerbrock/typescript-badges/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -57,15 +60,15 @@ A modern TypeScript library for extracting image specifications from URLs, strea
 ## 📦 Installation
 
 ```bash
-npm install image-specs
+npm install @dcforge/image-specs
 ```
 
 ```bash
-yarn add image-specs
+yarn add @dcforge/image-specs
 ```
 
 ```bash
-pnpm add image-specs
+pnpm add @dcforge/image-specs
 ```
 
 ## 🚀 Quick Start
@@ -75,7 +78,7 @@ pnpm add image-specs
 ### Basic Usage
 
 ```typescript
-import { getImageSpecs } from 'image-specs';
+import { getImageSpecs } from '@dcforge/image-specs';
 
 // From URL
 const specs = await getImageSpecs('https://example.com/image.jpg');
@@ -116,7 +119,7 @@ const specs = await getImageSpecs('https://example.com/image.webp', {
 ### Batch Processing
 
 ```typescript
-import { getImageSpecsBatch } from 'image-specs';
+import { getImageSpecsBatch } from '@dcforge/image-specs';
 
 const sources = [
   'https://example.com/image1.jpg',
@@ -139,7 +142,7 @@ results.forEach((result, index) => {
 ### Format Checking
 
 ```typescript
-import { isImageSource } from 'image-specs';
+import { isImageSource } from '@dcforge/image-specs';
 
 const isImage = await isImageSource('https://example.com/unknown-file');
 if (isImage) {
@@ -219,10 +222,10 @@ The package includes a command-line tool for extracting image specifications:
 
 ```bash
 # Install globally
-npm install -g image-specs
+npm install -g @dcforge/image-specs
 
 # Or use with npx
-npx image-specs [options] <source>...
+npx @dcforge/image-specs [options] <source>...
 ```
 
 ### CLI Examples
@@ -307,7 +310,7 @@ const specs = await getImageSpecs(dataUrl);
 
 ```typescript
 import { Readable } from 'stream';
-import { parseImage } from 'image-specs';
+import { parseImage } from '@dcforge/image-specs';
 
 const customStream = new Readable({
   read() {
@@ -321,7 +324,7 @@ const specs = await getImageSpecs(customStream);
 ### Error Handling
 
 ```typescript
-import { ImageSpecsError, ErrorCodes } from 'image-specs';
+import { ImageSpecsError, ErrorCodes } from '@dcforge/image-specs';
 
 try {
   const specs = await getImageSpecs('https://example.com/image.jpg');
