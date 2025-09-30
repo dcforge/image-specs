@@ -165,17 +165,17 @@ jobs:
           mkdir -p /tmp/test-install
           cd /tmp/test-install
           npm init -y
-          npm install ${{ github.workspace }}/image-specs-*.tgz
+          npm install ${{ github.workspace }}/dcforge-image-specs-*.tgz
 
       - name: Test ESM import
         run: |
           cd /tmp/test-install
-          node -e "import('image-specs').then(m => console.log('✅ ESM import works:', typeof m.getImageSpecs))"
+          node -e "import('@dcforge/image-specs').then(m => console.log('✅ ESM import works:', typeof m.getImageSpecs))"
 
       - name: Test CJS require
         run: |
           cd /tmp/test-install
-          node -e "const { getImageSpecs } = require('image-specs'); console.log('✅ CJS require works:', typeof getImageSpecs)"
+          node -e "const { getImageSpecs } = require('@dcforge/image-specs'); console.log('✅ CJS require works:', typeof getImageSpecs)"
 
       - name: Test CLI binary
         run: |
