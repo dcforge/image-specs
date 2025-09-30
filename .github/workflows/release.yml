@@ -270,7 +270,7 @@ jobs:
       - name: Verify npm publication
         run: |
           sleep 30  # Wait for npm registry to update
-          npm view image-specs@${{ needs.release.outputs.version }} version || exit 1
+          npm view @dcforge/image-specs@${{ needs.release.outputs.version }} version || exit 1
           echo "✅ Package successfully published to npm"
 
   notify:
