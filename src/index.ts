@@ -95,14 +95,49 @@ export async function getImageSpecs(
     }
 
     // Read data from stream
-    const buffer = await readStreamWithTimeout(stream, opts.maxBytes, opts.timeout);
+    let buffer = await readStreamWithTimeout(stream, opts.maxBytes, opts.timeout);
 
     if (buffer.length === 0) {
       throw new ImageSpecsError('No data received', ErrorCodes.INSUFFICIENT_DATA);
     }
 
     // Parse image
-    const parseResult = parseImage(buffer);
+    let parseResult = parseImage(buffer);
+
+    // If parsing failed and we have a URL source, try fetching more data
+    // This handles cases where metadata blocks are very large (e.g., Photoshop data)
+    const currentMaxBytes = opts.maxBytes ?? DEFAULT_OPTIONS.maxBytes;
+    if (!parseResult && url && buffer.length === currentMaxBytes) {
+      // Try with progressively larger buffers (up to 1MB)
+      const maxRetries = 3;
+      const increments = [currentMaxBytes * 2, currentMaxBytes * 4, 1048576]; // 128KB, 256KB, 1MB
+
+      for (let i = 0; i < maxRetries && !parseResult; i++) {
+        try {
+          const newMaxBytes = increments[i];
+          if (newMaxBytes === undefined) continue;
+
+          const retryTimeout: number = opts.timeout ?? DEFAULT_OPTIONS.timeout;
+          const retryOpts: ImageSpecsOptions = {
+            timeout: retryTimeout,
+            maxBytes: newMaxBytes,
+            headers: opts.headers,
+            userAgent: opts.userAgent,
+          };
+          const response = await fetchImageHeaders(url, retryOpts);
+          buffer = await readStreamWithTimeout(response.stream, newMaxBytes, retryTimeout);
+          parseResult = parseImage(buffer);
+        } catch (_error) {
+          // If retry fails, continue to next increment or give up
+          if (i === maxRetries - 1) {
+            throw new ImageSpecsError(
+              'Unsupported or corrupted image format',
+              ErrorCodes.UNSUPPORTED_FORMAT
+            );
+          }
+        }
+      }
+    }
 
     if (!parseResult) {
       throw new ImageSpecsError(
