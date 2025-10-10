@@ -7,6 +7,10 @@
 [![TypeScript](https://badges.frapsoft.com/typescript/love/typescript.svg?v=101)](https://github.com/ellerbrock/typescript-badges/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+<p align="center">
+  <img src="./assets/logo.png" alt="Logo" width="200"/>
+</p>
+
 A modern TypeScript library for extracting image specifications from URLs, streams, or buffers. Intelligently reads only the minimum bytes needed (typically just the file header) to extract metadata, making it extremely fast even with large images. Supports all major image formats with zero dependencies and provides both ESM and CommonJS builds.
 
 ## ✨ Features

@@ -231,11 +231,25 @@ export function parseJPEG(buffer: Buffer): ParseResult | null {
     const segmentLength = reader.readUInt16();
 
     // Validate segment length
-    if (segmentLength < 2 || !reader.canRead(segmentLength - 2)) {
+    if (segmentLength < 2) {
       break;
     }
 
+    // Check if we can read the full segment
+    const canReadFullSegment = reader.canRead(segmentLength - 2);
     const segmentStart = reader.getPosition();
+
+    // If we can't read the full segment, we'll skip it and continue
+    // This allows us to find the SOF marker even when there are large
+    // metadata segments (like Photoshop data) that exceed our buffer
+    if (!canReadFullSegment) {
+      // Skip what we can of this segment and continue looking for markers
+      const bytesToSkip = Math.min(segmentLength - 2, reader.remaining());
+      if (bytesToSkip > 0) {
+        reader.skip(bytesToSkip);
+      }
+      continue;
+    }
 
     // Parse JFIF segment for resolution
     if (marker === MARKERS.APP0) {
