@@ -1,4 +1,20 @@
 import { defineConfig } from 'tsup';
+import { readFileSync } from 'fs';
+
+const packageJson = JSON.parse(readFileSync('./package.json', 'utf-8')) as {
+  name: string;
+  version: string;
+};
+
+/**
+ * Package metadata is inlined at build time. Reading package.json at runtime
+ * breaks in the CJS bundle (no import.meta) and anywhere the bundle is shipped
+ * without its manifest.
+ */
+const define = {
+  __PACKAGE_NAME__: JSON.stringify(packageJson.name),
+  __PACKAGE_VERSION__: JSON.stringify(packageJson.version),
+};
 
 export default defineConfig([
   // Main library build
@@ -12,6 +28,7 @@ export default defineConfig([
     minify: false,
     target: 'node18',
     outDir: 'dist',
+    define,
   },
   // CLI build
   {
@@ -25,5 +42,6 @@ export default defineConfig([
     target: 'node18',
     outDir: 'dist',
     onSuccess: 'chmod +x dist/cli.js',
+    define,
   },
 ]);

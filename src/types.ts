@@ -1,26 +1,16 @@
 import { type Readable } from 'stream';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 
 /**
- * Get package version dynamically
+ * Package metadata, replaced at build time by tsup (and by vitest when running
+ * tests). Reading package.json at runtime instead would resolve to the wrong
+ * path in the CJS bundle and fail outright once the bundle is shipped without
+ * its manifest.
  */
-function getPackageVersion(): string {
-  try {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    const packageJson = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8')) as {
-      version: string;
-    };
-    return packageJson.version;
-  } catch {
-    // Fallback for environments where package.json is not accessible
-    return '1.0.0';
-  }
-}
+declare const __PACKAGE_NAME__: string;
+declare const __PACKAGE_VERSION__: string;
 
-export const PACKAGE_VERSION = getPackageVersion();
+export const PACKAGE_NAME = __PACKAGE_NAME__;
+export const PACKAGE_VERSION = __PACKAGE_VERSION__;
 
 /**
  * Image specifications extracted from an image file

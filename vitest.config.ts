@@ -1,6 +1,17 @@
 import { defineConfig } from 'vitest/config';
+import { readFileSync } from 'fs';
+
+const packageJson = JSON.parse(readFileSync('./package.json', 'utf-8')) as {
+  name: string;
+  version: string;
+};
 
 export default defineConfig({
+  // Mirrors the build-time constants injected by tsup
+  define: {
+    __PACKAGE_NAME__: JSON.stringify(packageJson.name),
+    __PACKAGE_VERSION__: JSON.stringify(packageJson.version),
+  },
   test: {
     globals: true,
     environment: 'node',
