@@ -1,5 +1,5 @@
-import type { ParseResult } from '../types.js';
-import { BufferReader } from '../utils/index.js';
+import { defined, type ParseResult } from '../types.js';
+import { BufferReader } from '../utils/buffer-reader.js';
 import { getColorSpaceFromString, getColorSpaceFromTag } from '../utils/color-space.js';
 
 /**
@@ -8,43 +8,32 @@ import { getColorSpaceFromString, getColorSpaceFromTag } from '../utils/color-sp
 const MARKERS = {
   SOI: 0xffd8, // Start of Image
   EOI: 0xffd9, // End of Image
-  SOF0: 0xffc0, // Start of Frame (Baseline DCT)
-  SOF1: 0xffc1, // Start of Frame (Extended Sequential DCT)
-  SOF2: 0xffc2, // Start of Frame (Progressive DCT)
-  SOF3: 0xffc3, // Start of Frame (Lossless)
-  SOF5: 0xffc5, // Start of Frame (Differential Sequential DCT)
-  SOF6: 0xffc6, // Start of Frame (Differential Progressive DCT)
-  SOF7: 0xffc7, // Start of Frame (Differential Lossless)
-  SOF9: 0xffc9, // Start of Frame (Extended Sequential DCT, Arithmetic coding)
-  SOF10: 0xffca, // Start of Frame (Progressive DCT, Arithmetic coding)
-  SOF11: 0xffcb, // Start of Frame (Lossless, Arithmetic coding)
-  SOF13: 0xffcd, // Start of Frame (Differential Sequential DCT, Arithmetic coding)
-  SOF14: 0xffce, // Start of Frame (Differential Progressive DCT, Arithmetic coding)
-  SOF15: 0xffcf, // Start of Frame (Differential Lossless, Arithmetic coding)
   APP0: 0xffe0, // Application Specific (JFIF)
   APP1: 0xffe1, // Application Specific (EXIF)
   APP2: 0xffe2, // Application Specific (ICC Profile)
   APP14: 0xffee, // Application Specific (Adobe)
 } as const;
 
+/** Centimetres per inch, for converting densities to DPI */
+const CM_PER_INCH = 2.54;
+
 /**
- * Check if a marker is a Start of Frame marker
+ * Color space implied by the SOF component count, used only as a last resort
+ */
+const COLOR_SPACE_BY_COMPONENTS: Record<number, string> = { 1: 'Grayscale', 3: 'RGB', 4: 'CMYK' };
+
+/**
+ * Check if a marker is a Start of Frame marker.
+ *
+ * SOF markers occupy 0xFFC0-0xFFCF apart from three slots taken by other
+ * segment types.
  */
 function isSOFMarker(marker: number): boolean {
   return (
-    marker === MARKERS.SOF0 ||
-    marker === MARKERS.SOF1 ||
-    marker === MARKERS.SOF2 ||
-    marker === MARKERS.SOF3 ||
-    marker === MARKERS.SOF5 ||
-    marker === MARKERS.SOF6 ||
-    marker === MARKERS.SOF7 ||
-    marker === MARKERS.SOF9 ||
-    marker === MARKERS.SOF10 ||
-    marker === MARKERS.SOF11 ||
-    marker === MARKERS.SOF13 ||
-    marker === MARKERS.SOF14 ||
-    marker === MARKERS.SOF15
+    (marker & 0xfff0) === 0xffc0 &&
+    marker !== 0xffc4 && // DHT (Define Huffman Table)
+    marker !== 0xffc8 && // JPG (reserved)
+    marker !== 0xffcc // DAC (Define Arithmetic Coding)
   );
 }
 
@@ -66,11 +55,13 @@ function parseJFIF(reader: BufferReader): { wResolution?: number; hResolution?: 
   if (densityUnits === 1) {
     // dots per inch
     return { wResolution: xDensity, hResolution: yDensity };
-  } else if (densityUnits === 2) {
+  }
+
+  if (densityUnits === 2) {
     // dots per cm
     return {
-      wResolution: Math.round(xDensity * 2.54),
-      hResolution: Math.round(yDensity * 2.54),
+      wResolution: Math.round(xDensity * CM_PER_INCH),
+      hResolution: Math.round(yDensity * CM_PER_INCH),
     };
   }
 
@@ -78,12 +69,36 @@ function parseJFIF(reader: BufferReader): { wResolution?: number; hResolution?: 
 }
 
 /**
+ * EXIF/TIFF tags carrying resolution information
+ */
+const EXIF_TAGS = {
+  X_RESOLUTION: 0x011a,
+  Y_RESOLUTION: 0x011b,
+  RESOLUTION_UNIT: 0x0128,
+} as const;
+
+/**
+ * Read a TIFF RATIONAL (two uint32s) from an absolute offset, restoring the
+ * reader's position afterwards
+ */
+function readRational(reader: BufferReader, offset: number): number | undefined {
+  if (offset + 8 > reader.getBuffer().length) {
+    return undefined;
+  }
+
+  const saved = reader.getPosition();
+  reader.seek(offset);
+  const numerator = reader.readUInt32();
+  const denominator = reader.readUInt32();
+  reader.seek(saved);
+
+  return denominator > 0 ? numerator / denominator : undefined;
+}
+
+/**
  * Parse EXIF app1 segment for resolution information
  */
-function parseEXIF(
-  reader: BufferReader,
-  _segmentLength: number
-): { wResolution?: number; hResolution?: number } {
+function parseEXIF(reader: BufferReader): { wResolution?: number; hResolution?: number } {
   // Check for EXIF identifier
   if (!reader.canRead(6) || reader.readString(6) !== 'Exif\0\0') {
     return {};
@@ -130,59 +145,30 @@ function parseEXIF(
     const count = tiffReader.readUInt32();
     const valueOffset = tiffReader.readUInt32();
 
-    // XResolution tag (0x011A)
-    if (tag === 0x011a && type === 5 && count === 1) {
-      const offset = valueOffset + tiffStart;
-      if (offset + 8 <= reader.getBuffer().length) {
-        const savedPos = tiffReader.getPosition();
-        tiffReader.seek(offset);
-        const numerator = tiffReader.readUInt32();
-        const denominator = tiffReader.readUInt32();
-        if (denominator > 0) {
-          xResolution = numerator / denominator;
-        }
-        tiffReader.seek(savedPos);
-      }
-    }
-
-    // YResolution tag (0x011B)
-    if (tag === 0x011b && type === 5 && count === 1) {
-      const offset = valueOffset + tiffStart;
-      if (offset + 8 <= reader.getBuffer().length) {
-        const savedPos = tiffReader.getPosition();
-        tiffReader.seek(offset);
-        const numerator = tiffReader.readUInt32();
-        const denominator = tiffReader.readUInt32();
-        if (denominator > 0) {
-          yResolution = numerator / denominator;
-        }
-        tiffReader.seek(savedPos);
-      }
-    }
-
-    // ResolutionUnit tag (0x0128)
-    if (tag === 0x0128 && type === 3 && count === 1) {
-      // For SHORT type (type 3) with count 1, value fits in 2 bytes
-      // and is stored in the first 2 bytes of the valueOffset field
+    if (type === 5 && count === 1 && tag === EXIF_TAGS.X_RESOLUTION) {
+      xResolution = readRational(tiffReader, valueOffset + tiffStart) ?? xResolution;
+    } else if (type === 5 && count === 1 && tag === EXIF_TAGS.Y_RESOLUTION) {
+      yResolution = readRational(tiffReader, valueOffset + tiffStart) ?? yResolution;
+    } else if (type === 3 && count === 1 && tag === EXIF_TAGS.RESOLUTION_UNIT) {
+      // A SHORT with count 1 is stored in the first 2 bytes of the value field
       resolutionUnit = isLittleEndian ? valueOffset & 0xffff : valueOffset >>> 16;
     }
   }
 
-  if (xResolution && yResolution) {
-    // Convert to DPI if needed
-    if (resolutionUnit === 3) {
-      // Centimeters
-      return {
-        wResolution: Math.round(xResolution * 2.54),
-        hResolution: Math.round(yResolution * 2.54),
-      };
-    } else if (resolutionUnit === 2) {
-      // Inches
-      return {
-        wResolution: Math.round(xResolution),
-        hResolution: Math.round(yResolution),
-      };
-    }
+  if (!xResolution || !yResolution) {
+    return {};
+  }
+
+  // Unit 3 is centimetres, unit 2 is inches; anything else is unitless
+  if (resolutionUnit === 3) {
+    return {
+      wResolution: Math.round(xResolution * CM_PER_INCH),
+      hResolution: Math.round(yResolution * CM_PER_INCH),
+    };
+  }
+
+  if (resolutionUnit === 2) {
+    return { wResolution: Math.round(xResolution), hResolution: Math.round(yResolution) };
   }
 
   return {};
@@ -249,7 +235,7 @@ export function parseJPEG(buffer: Buffer): ParseResult | null {
 
     // Parse EXIF segment for resolution (prefer EXIF over JFIF)
     if (marker === MARKERS.APP1) {
-      const resolution = parseEXIF(reader, segmentLength - 2);
+      const resolution = parseEXIF(reader);
       // EXIF resolution takes precedence over JFIF
       if (resolution.wResolution !== undefined) {
         wResolution = resolution.wResolution;
@@ -344,45 +330,28 @@ export function parseJPEG(buffer: Buffer): ParseResult | null {
       const components = reader.readUInt8(); // Number of components
 
       if (width > 0 && height > 0) {
-        const result: ParseResult = {
+        // Infer color space from the component count if nothing else set it
+        if (components && !colorSpace) {
+          colorSpace = COLOR_SPACE_BY_COMPONENTS[components];
+        }
+
+        return {
           width,
           height,
           type: 'jpg',
           mime: 'image/jpeg',
           wUnits: 'px',
           hUnits: 'px',
+          ...defined({
+            // Zero precision or component count means the SOF header is malformed
+            bitDepth: precision > 0 ? precision : undefined,
+            channels: components > 0 ? components : undefined,
+            wResolution,
+            hResolution,
+            colorSpace,
+            iccProfile,
+          }),
         };
-
-        // Set bit depth from precision
-        if (precision) {
-          result.bitDepth = precision;
-        }
-
-        // Set channels from components (typically 1=grayscale, 3=RGB, 4=CMYK)
-        if (components) {
-          result.channels = components;
-          // Infer color space if not already set
-          if (!colorSpace) {
-            if (components === 1) colorSpace = 'Grayscale';
-            else if (components === 3) colorSpace = 'RGB';
-            else if (components === 4) colorSpace = 'CMYK';
-          }
-        }
-
-        if (wResolution !== undefined) {
-          result.wResolution = wResolution;
-        }
-        if (hResolution !== undefined) {
-          result.hResolution = hResolution;
-        }
-        if (colorSpace !== undefined) {
-          result.colorSpace = colorSpace;
-        }
-        if (iccProfile !== undefined) {
-          result.iccProfile = iccProfile;
-        }
-
-        return result;
       }
     }
 

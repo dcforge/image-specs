@@ -1,37 +1,16 @@
-import type { ParseResult } from '../types.js';
-import { BufferReader } from '../utils/index.js';
+import { defined, type ParseResult } from '../types.js';
+import { BufferReader } from '../utils/buffer-reader.js';
+import { identifyIccProfile } from '../utils/color-space.js';
 
 /**
- * Determine color space from ICC profile data (similar to WebP)
+ * Color space implied by the nclx colour primaries
  */
-function getColorSpaceFromProfileData(profileData: Buffer): {
-  profileName?: string;
-  colorSpace?: string;
-} {
-  // Convert to string, looking for common profile names
-  const profileStr = profileData
-    .toString('ascii', 0, Math.min(profileData.length, 512))
-    .replace(/\0/g, ' ');
-
-  // Common ICC profile patterns
-  const patterns = [
-    { pattern: /Adobe RGB \(1998\)/, name: 'Adobe RGB (1998)', colorSpace: 'Adobe RGB' },
-    { pattern: /sRGB IEC61966-2\.1/, name: 'sRGB IEC61966-2.1', colorSpace: 'sRGB' },
-    { pattern: /Display P3/, name: 'Display P3', colorSpace: 'Display P3' },
-    { pattern: /ProPhoto RGB/, name: 'ProPhoto RGB', colorSpace: 'ProPhoto RGB' },
-    { pattern: /Rec\. 2020/, name: 'Rec. 2020', colorSpace: 'Rec. 2020' },
-    { pattern: /DCI-P3/, name: 'DCI-P3', colorSpace: 'DCI-P3' },
-  ];
-
-  for (const { pattern, name, colorSpace } of patterns) {
-    const match = profileStr.match(pattern);
-    if (match) {
-      return { profileName: name, colorSpace };
-    }
-  }
-
-  return {};
-}
+const COLOR_SPACE_BY_PRIMARIES: Record<number, string> = {
+  1: 'sRGB', // BT.709
+  9: 'Rec. 2020', // BT.2020
+  11: 'DCI-P3',
+  12: 'Display P3',
+};
 
 /**
  * Parse ftyp box to verify AVIF format
@@ -88,12 +67,7 @@ function parseIspe(reader: BufferReader): { width: number; height: number } | nu
 function parseColr(
   reader: BufferReader,
   size: number
-): {
-  colorSpace?: string;
-  iccProfile?: string;
-  colorPrimaries?: number;
-  transferCharacteristics?: number;
-} | null {
+): { colorSpace?: string; iccProfile?: string } | null {
   if (!reader.canRead(4)) {
     return null;
   }
@@ -101,56 +75,17 @@ function parseColr(
   const colorType = reader.readString(4);
 
   if (colorType === 'prof' || colorType === 'rICC') {
-    // ICC profile
     const iccDataSize = size - 4;
     if (reader.canRead(iccDataSize)) {
-      const iccData = reader.readBytes(iccDataSize);
-      const { profileName, colorSpace } = getColorSpaceFromProfileData(iccData);
+      const profile = identifyIccProfile(reader.readBytes(iccDataSize));
       return {
-        colorSpace: colorSpace ?? 'ICC Profile',
-        iccProfile: profileName ?? 'Embedded ICC Profile',
+        colorSpace: profile.colorSpace ?? 'ICC Profile',
+        iccProfile: profile.iccProfile ?? 'Embedded ICC Profile',
       };
     }
-  } else if (colorType === 'nclx') {
-    // Color parameters
-    if (reader.canRead(7)) {
-      const colorPrimaries = reader.readUInt16();
-      const transferCharacteristics = reader.readUInt16();
-      reader.skip(2); // Skip matrix coefficients
-      reader.skip(1); // Skip full range flag
-
-      // Determine color space from color primaries
-      let colorSpace: string | undefined;
-      switch (colorPrimaries) {
-        case 1: // BT.709
-          colorSpace = 'sRGB';
-          break;
-        case 9: // BT.2020
-          colorSpace = 'Rec. 2020';
-          break;
-        case 11: // DCI P3
-          colorSpace = 'DCI-P3';
-          break;
-        case 12: // Display P3
-          colorSpace = 'Display P3';
-          break;
-      }
-
-      const result: {
-        colorSpace?: string;
-        iccProfile?: string;
-        colorPrimaries?: number;
-        transferCharacteristics?: number;
-      } = {};
-
-      if (colorSpace) {
-        result.colorSpace = colorSpace;
-      }
-      result.colorPrimaries = colorPrimaries;
-      result.transferCharacteristics = transferCharacteristics;
-
-      return result;
-    }
+  } else if (colorType === 'nclx' && reader.canRead(7)) {
+    const colorPrimaries = reader.readUInt16();
+    return defined({ colorSpace: COLOR_SPACE_BY_PRIMARIES[colorPrimaries] });
   }
 
   return null;
@@ -314,32 +249,23 @@ export function parseAVIF(buffer: Buffer): ParseResult | null {
     }
   }
 
-  if (isAVIF && width !== undefined && height !== undefined && width > 0 && height > 0) {
-    const result: ParseResult = {
-      width,
-      height,
-      type: 'avif',
-      mime: 'image/avif',
-      wUnits: 'px',
-      hUnits: 'px',
-    };
-
-    // Add optional metadata
-    if (colorSpace) {
-      result.colorSpace = colorSpace;
-    }
-    if (iccProfile) {
-      result.iccProfile = iccProfile;
-    }
-    if (bitDepth) {
-      result.bitDepth = bitDepth;
-    }
-    if (channels) {
-      result.channels = channels;
-    }
-
-    return result;
+  if (!isAVIF || width === undefined || height === undefined || width <= 0 || height <= 0) {
+    return null;
   }
 
-  return null;
+  return {
+    width,
+    height,
+    type: 'avif',
+    mime: 'image/avif',
+    wUnits: 'px',
+    hUnits: 'px',
+    ...defined({
+      colorSpace,
+      iccProfile,
+      // A zero count only shows up in malformed pixi boxes, so treat it as absent
+      bitDepth: bitDepth && bitDepth > 0 ? bitDepth : undefined,
+      channels: channels && channels > 0 ? channels : undefined,
+    }),
+  };
 }

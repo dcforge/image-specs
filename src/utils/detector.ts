@@ -11,179 +11,100 @@ import { parseICO } from '../parsers/ico.js';
 /**
  * Image format detector entry
  */
-interface DetectorEntry {
+interface Detector {
+  ext: string;
   parser: Parser;
   validate: (buffer: Buffer) => boolean;
 }
 
+/** How far into a text file to look for an SVG root element */
+const SVG_SCAN_LIMIT = 1024;
+
 /**
- * Check if buffer matches signature at offset
+ * Check if buffer matches a signature at the given offset
  */
-function matchesSignature(buffer: Buffer, signature: number[] | Buffer, offset = 0): boolean {
-  if (offset + signature.length > buffer.length) {
+function matchesSignature(buffer: Buffer, signature: string | number[], offset = 0): boolean {
+  const bytes = typeof signature === 'string' ? Buffer.from(signature, 'ascii') : signature;
+  if (offset + bytes.length > buffer.length) {
     return false;
   }
 
-  const sig = Array.isArray(signature) ? signature : Array.from(signature);
-
-  for (let i = 0; i < sig.length; i++) {
-    if (buffer[offset + i] !== sig[i]) {
-      return false;
-    }
-  }
-
-  return true;
+  return bytes.every((byte, index) => buffer[offset + index] === byte);
 }
 
 /**
- * JPEG detector - checks for SOI marker (0xFFD8)
+ * AVIF is an ISOBMFF file whose ftyp box declares an 'avif' or 'avis' brand
  */
-const jpegDetector: DetectorEntry = {
-  parser: parseJPEG,
-  validate: (buffer: Buffer) => {
-    return buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xd8;
-  },
-};
-
-/**
- * PNG detector - checks for PNG signature
- */
-const pngDetector: DetectorEntry = {
-  parser: parsePNG,
-  validate: (buffer: Buffer) => {
-    return matchesSignature(buffer, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  },
-};
-
-/**
- * GIF detector - checks for GIF87a or GIF89a
- */
-const gifDetector: DetectorEntry = {
-  parser: parseGIF,
-  validate: (buffer: Buffer) => {
-    if (buffer.length < 6) return false;
-    const sig = buffer.subarray(0, 6).toString('ascii');
-    return sig === 'GIF87a' || sig === 'GIF89a';
-  },
-};
-
-/**
- * WebP detector - checks for RIFF header with WEBP
- */
-const webpDetector: DetectorEntry = {
-  parser: parseWebP,
-  validate: (buffer: Buffer) => {
-    return (
-      buffer.length >= 12 &&
-      matchesSignature(buffer, Buffer.from('RIFF'), 0) &&
-      matchesSignature(buffer, Buffer.from('WEBP'), 8)
-    );
-  },
-};
-
-/**
- * BMP detector - checks for BM signature
- */
-const bmpDetector: DetectorEntry = {
-  parser: parseBMP,
-  validate: (buffer: Buffer) => {
-    return (
-      buffer.length >= 2 &&
-      buffer[0] === 0x42 && // 'B'
-      buffer[1] === 0x4d
-    ); // 'M'
-  },
-};
-
-/**
- * ICO detector - checks for ICO header (0x00 0x00 0x01 0x00)
- */
-const icoDetector: DetectorEntry = {
-  parser: parseICO,
-  validate: (buffer: Buffer) => {
-    return (
-      buffer.length >= 4 &&
-      buffer[0] === 0x00 &&
-      buffer[1] === 0x00 &&
-      buffer[2] === 0x01 &&
-      buffer[3] === 0x00
-    );
-  },
-};
-
-/**
- * AVIF detector - checks for ftyp box with AVIF brand
- */
-const avifDetector: DetectorEntry = {
-  parser: parseAVIF,
-  validate: (buffer: Buffer) => {
-    if (buffer.length < 12) return false;
-
-    // Check for ftyp box at offset 4
-    if (!matchesSignature(buffer, Buffer.from('ftyp'), 4)) {
-      return false;
-    }
-
-    // Check for AVIF brand (major or compatible)
-    const brandsSection = buffer.subarray(8, Math.min(buffer.length, 100));
-    const brandsStr = brandsSection.toString('ascii');
-
-    return brandsStr.includes('avif') || brandsStr.includes('avis');
-  },
-};
-
-/**
- * SVG detector - checks for SVG or XML content
- * Note: SVG is checked last as it's text-based and less precise
- */
-const svgDetector: DetectorEntry = {
-  parser: parseSVG,
-  validate: (buffer: Buffer) => {
-    // SVG files might start with XML declaration or directly with <svg
-    // We need to be careful not to match other XML files
-    const str = buffer.subarray(0, Math.min(buffer.length, 1024)).toString('utf8');
-
-    // Check for SVG-specific patterns
-    if (str.includes('<svg')) return true;
-    if (str.includes('<?xml') && str.includes('<svg')) return true;
-    if (str.includes('<!DOCTYPE svg')) return true;
-
+function isAVIF(buffer: Buffer): boolean {
+  if (!matchesSignature(buffer, 'ftyp', 4)) {
     return false;
-  },
-};
+  }
+
+  const brands = buffer.subarray(8, Math.min(buffer.length, 100)).toString('ascii');
+  return brands.includes('avif') || brands.includes('avis');
+}
 
 /**
- * Detector registry - ordered by reliability and frequency
- * Binary formats first, text formats last
+ * Detector registry, ordered by reliability: binary signatures first, and the
+ * text-based SVG check last because it is the least precise
  */
-const detectors: readonly DetectorEntry[] = [
-  jpegDetector,
-  pngDetector,
-  gifDetector,
-  webpDetector,
-  bmpDetector,
-  icoDetector,
-  avifDetector,
-  svgDetector, // SVG last as it's least precise
+const DETECTORS: readonly Detector[] = [
+  { ext: 'jpg', parser: parseJPEG, validate: (b) => matchesSignature(b, [0xff, 0xd8]) },
+  {
+    ext: 'png',
+    parser: parsePNG,
+    validate: (b) => matchesSignature(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  },
+  {
+    ext: 'gif',
+    parser: parseGIF,
+    validate: (b) => matchesSignature(b, 'GIF87a') || matchesSignature(b, 'GIF89a'),
+  },
+  {
+    ext: 'webp',
+    parser: parseWebP,
+    validate: (b) => matchesSignature(b, 'RIFF') && matchesSignature(b, 'WEBP', 8),
+  },
+  { ext: 'bmp', parser: parseBMP, validate: (b) => matchesSignature(b, 'BM') },
+  {
+    ext: 'ico',
+    parser: parseICO,
+    validate: (b) => matchesSignature(b, [0x00, 0x00, 0x01, 0x00]),
+  },
+  { ext: 'avif', parser: parseAVIF, validate: isAVIF },
+  {
+    ext: 'svg',
+    parser: parseSVG,
+    validate: (b) => {
+      const head = b.subarray(0, SVG_SCAN_LIMIT).toString('utf8');
+      return head.includes('<svg') || head.includes('<!DOCTYPE svg');
+    },
+  },
 ];
 
 /**
  * Detect image format from buffer and return appropriate parser
  */
 export function detectFormat(buffer: Buffer): Parser | null {
-  for (const detector of detectors) {
-    if (detector.validate(buffer)) {
-      return detector.parser;
-    }
-  }
-  return null;
+  return DETECTORS.find((detector) => detector.validate(buffer))?.parser ?? null;
 }
 
 /**
  * Get all parsers in order (for fallback)
  */
 export function getAllParsers(): readonly Parser[] {
-  return detectors.map((d) => d.parser);
+  return DETECTORS.map((detector) => detector.parser);
+}
+
+/**
+ * Get image format type from buffer (without parsing)
+ */
+export function getImageType(buffer: Buffer): string | null {
+  if (buffer.length < 2) {
+    return null;
+  }
+
+  return DETECTORS.find((detector) => detector.validate(buffer))?.ext ?? null;
 }
 
 /**
@@ -215,27 +136,8 @@ export function mightBeImage(buffer: Buffer): boolean {
     default:
       // Check for AVIF (starts with size + 'ftyp')
       if (buffer.length >= 8) {
-        return matchesSignature(buffer, Buffer.from('ftyp'), 4);
+        return matchesSignature(buffer, 'ftyp', 4);
       }
       return false;
   }
-}
-
-/**
- * Get image format type from buffer (without parsing)
- */
-export function getImageType(buffer: Buffer): string | null {
-  if (buffer.length < 2) return null;
-
-  // Check each format in order
-  if (jpegDetector.validate(buffer)) return 'jpg';
-  if (pngDetector.validate(buffer)) return 'png';
-  if (gifDetector.validate(buffer)) return 'gif';
-  if (webpDetector.validate(buffer)) return 'webp';
-  if (bmpDetector.validate(buffer)) return 'bmp';
-  if (icoDetector.validate(buffer)) return 'ico';
-  if (avifDetector.validate(buffer)) return 'avif';
-  if (svgDetector.validate(buffer)) return 'svg';
-
-  return null;
 }

@@ -109,6 +109,24 @@ export interface ParseResult {
 }
 
 /**
+ * Every key optional, with `undefined` removed from each value type
+ */
+type Defined<T> = { [K in keyof T]?: Exclude<T[K], undefined> };
+
+/**
+ * Drop keys whose value is `undefined`.
+ *
+ * `exactOptionalPropertyTypes` rejects an explicit `undefined` on an optional
+ * property, so optional metadata is collected in one object literal and spread
+ * through this helper instead of being assigned key by key.
+ */
+export function defined<T extends object>(obj: T): Defined<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined)
+  ) as Defined<T>;
+}
+
+/**
  * Parser function signature
  */
 export type Parser = (buffer: Buffer) => ParseResult | null;

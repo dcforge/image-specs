@@ -1,6 +1,9 @@
-import type { ParseResult } from '../types.js';
-import { BufferReader } from '../utils/index.js';
-import { getColorSpaceFromString } from '../utils/color-space.js';
+import { defined, type ParseResult } from '../types.js';
+import { BufferReader } from '../utils/buffer-reader.js';
+import { identifyIccProfile } from '../utils/color-space.js';
+
+/** How much of an ICC profile to read when looking for its description */
+const ICC_SCAN_LIMIT = 512;
 
 /**
  * Parse WebP VP8 chunk
@@ -175,129 +178,17 @@ export function parseWebP(buffer: Buffer): ParseResult | null {
         // Already handled in first pass
         break;
 
-      case 'ICCP':
-        // ICC Profile chunk
-        if (chunkSize > 0 && reader.canRead(Math.min(chunkSize, 256))) {
-          // WebP ICCP chunk contains raw ICC profile data
-          // ICC profile structure:
-          // - Bytes 0-127: Profile header
-          // - After header: Tagged element table
-          // The profile description is typically in a 'desc' tag
-
-          // Look for the 'desc' tag in the ICC profile
-          const searchLimit = Math.min(chunkSize, 512);
-          if (reader.canRead(searchLimit)) {
-            const profileData = reader.readBytes(searchLimit);
-
-            // Search for 'desc' tag (0x64657363)
-            const descTag = Buffer.from([0x64, 0x65, 0x73, 0x63]);
-            const descIndex = profileData.indexOf(descTag);
-
-            if (descIndex > 0 && descIndex + 12 < profileData.length) {
-              // Skip 'desc' tag (4 bytes) and reserved (4 bytes) to get to offset
-              const descOffset = profileData.readUInt32BE(descIndex + 4);
-              const descSize = profileData.readUInt32BE(descIndex + 8);
-
-              // The description starts at descOffset from the beginning of the profile
-              if (descOffset < profileData.length && descSize > 0) {
-                // Read description type signature (4 bytes)
-                const typeSignature = profileData.readUInt32BE(descOffset);
-
-                // 0x64657363 = 'desc' - text description type
-                if (typeSignature === 0x64657363 && descOffset + 12 < profileData.length) {
-                  // Skip reserved (4 bytes) and get ASCII string length
-                  const asciiLength = profileData.readUInt32BE(descOffset + 8);
-
-                  if (asciiLength > 0 && descOffset + 12 + asciiLength <= profileData.length) {
-                    // Read ASCII string (null-terminated)
-                    const nameBytes = profileData.subarray(
-                      descOffset + 12,
-                      descOffset + 12 + asciiLength
-                    );
-                    iccProfileName = nameBytes.toString('ascii').replace(/\0/g, '').trim();
-                  }
-                }
-              }
-            }
-
-            // Alternative: Try to find profile description in a simpler way
-            // Look for common profile names in the data
-            if (!iccProfileName) {
-              // Convert to string, replacing null bytes with spaces to make pattern matching work
-              const profileStr = profileData.toString('ascii', 0, searchLimit).replace(/\0/g, ' ');
-
-              // Common ICC profile patterns
-              const profilePatterns: { pattern: RegExp; name: string }[] = [
-                { pattern: /Adobe RGB \(1998\)/, name: 'Adobe RGB (1998)' },
-                { pattern: /sRGB IEC61966-2\.1/, name: 'sRGB IEC61966-2.1' },
-                { pattern: /Display P3/, name: 'Display P3' },
-                { pattern: /ProPhoto RGB/, name: 'ProPhoto RGB' },
-                { pattern: /Rec\. 2020/, name: 'Rec. 2020' },
-                { pattern: /DCI-P3/, name: 'DCI-P3' },
-              ];
-
-              for (const { pattern, name } of profilePatterns) {
-                const match = profileStr.match(pattern);
-                if (match) {
-                  iccProfileName = name;
-                  colorSpace = getColorSpaceFromString(name);
-                  break;
-                }
-              }
-            }
-
-            // Debug: If still no name found, look for any ASCII string after 'desc'
-            if (!iccProfileName && descIndex > 0) {
-              // Try a simpler approach - just look for readable text after 'desc'
-              const startSearch = descIndex + 12; // Skip 'desc' tag and some header bytes
-              if (startSearch < profileData.length - 20) {
-                // Find the first readable ASCII sequence
-                for (
-                  let i = startSearch;
-                  i < Math.min(startSearch + 200, profileData.length - 1);
-                  i++
-                ) {
-                  const byte = profileData[i] ?? 0;
-                  // Look for printable ASCII characters
-                  if (byte >= 32 && byte <= 126) {
-                    // Found start of text, read until non-printable
-                    let endPos = i;
-                    while (
-                      endPos < profileData.length &&
-                      (profileData[endPos] ?? 0) >= 32 &&
-                      (profileData[endPos] ?? 0) <= 126
-                    ) {
-                      endPos++;
-                    }
-                    if (endPos - i > 4) {
-                      // Minimum length for a meaningful name
-                      const possibleName = profileData.toString('ascii', i, endPos).trim();
-                      if (
-                        possibleName &&
-                        !possibleName.includes('text') &&
-                        !possibleName.includes('Copyright')
-                      ) {
-                        iccProfileName = possibleName;
-                        colorSpace = getColorSpaceFromString(possibleName);
-                        break;
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          // If we found a profile but couldn't identify it
-          iccProfileName ??= 'Embedded ICC Profile'; // Without being able to parse the profile, we can't determine the exact color space
-          // Don't set colorSpace to avoid confusion
-
-          // Try to determine color space from the profile name if we have one but no color space yet
-          if (iccProfileName && !colorSpace) {
-            colorSpace = getColorSpaceFromString(iccProfileName);
-          }
+      case 'ICCP': {
+        // Raw ICC profile data: a 128-byte header followed by a tagged
+        // element table holding the profile description
+        const profileSize = Math.min(chunkSize, ICC_SCAN_LIMIT);
+        if (profileSize > 0 && reader.canRead(profileSize)) {
+          const profile = identifyIccProfile(reader.readBytes(profileSize));
+          iccProfileName = profile.iccProfile ?? 'Embedded ICC Profile';
+          colorSpace = profile.colorSpace;
         }
         break;
+      }
     }
 
     // Move to next chunk (pad to even byte boundary)
@@ -305,31 +196,18 @@ export function parseWebP(buffer: Buffer): ParseResult | null {
   }
 
   // After processing all chunks, return the result if we have dimensions
-  if (width && height && width > 0 && height > 0) {
-    const result: ParseResult = {
-      width,
-      height,
-      type: 'webp',
-      mime: 'image/webp',
-      wUnits: 'px',
-      hUnits: 'px',
-    };
-
-    // Add metadata if available
-    if (colorSpace) {
-      result.colorSpace = colorSpace;
-    }
-    if (iccProfileName) {
-      result.iccProfile = iccProfileName;
-    }
-    if (hasAlpha) {
-      result.channels = 4; // RGBA
-    } else {
-      result.channels = 3; // RGB
-    }
-
-    return result;
+  if (!width || !height || width <= 0 || height <= 0) {
+    return null;
   }
 
-  return null;
+  return {
+    width,
+    height,
+    type: 'webp',
+    mime: 'image/webp',
+    wUnits: 'px',
+    hUnits: 'px',
+    ...defined({ colorSpace, iccProfile: iccProfileName }),
+    channels: hasAlpha ? 4 : 3, // RGBA or RGB
+  };
 }

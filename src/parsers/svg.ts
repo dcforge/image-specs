@@ -32,31 +32,40 @@ function parseDimension(dimension: string): { value: number; unit: string } | nu
 }
 
 /**
+ * Pixels per unit at 96 DPI, assuming a 16px base font size.
+ * Unlisted units (including 'px' and '') are treated as pixels.
+ */
+const PIXELS_PER_UNIT: Record<string, number> = {
+  in: 96,
+  cm: 37.8,
+  mm: 3.78,
+  pt: 1.33, // 72 pt = 96 px
+  pc: 16, // 1 pc = 12 pt
+  em: 16,
+  rem: 16,
+  ex: 8, // Rough approximation
+};
+
+/**
  * Convert various units to pixels (rough approximation)
  */
 function convertToPixels(value: number, unit: string): number {
-  switch (unit) {
-    case 'px':
-    case '':
-      return value;
-    case 'in':
-      return value * 96; // 96 DPI
-    case 'cm':
-      return value * 37.8; // ~96 DPI
-    case 'mm':
-      return value * 3.78; // ~96 DPI
-    case 'pt':
-      return value * 1.33; // 72 pt = 96 px
-    case 'pc':
-      return value * 16; // 1 pc = 12 pt
-    case 'em':
-    case 'rem':
-      return value * 16; // Assume 16px base font size
-    case 'ex':
-      return value * 8; // Rough approximation
-    default:
-      return value; // Fallback to treating as pixels
+  return value * (PIXELS_PER_UNIT[unit] ?? 1);
+}
+
+/**
+ * Resolve a raw width/height attribute to pixels and its reported unit
+ */
+function readDimension(raw: string | undefined): { pixels: number; unit: string } | undefined {
+  const dimension = raw ? parseDimension(raw) : null;
+  if (!dimension) {
+    return undefined;
   }
+
+  return {
+    pixels: convertToPixels(dimension.value, dimension.unit),
+    unit: dimension.unit === '' ? 'px' : dimension.unit,
+  };
 }
 
 /**
@@ -87,55 +96,37 @@ export function parseSVG(buffer: Buffer): ParseResult | null {
   const heightMatch = /height\s*=\s*["']([^"']+)["']/i.exec(svgTag);
   const viewBoxMatch = /viewBox\s*=\s*["']([^"']+)["']/i.exec(svgTag);
 
-  let width: number | undefined;
-  let height: number | undefined;
-  let wUnits = 'px';
-  let hUnits = 'px';
+  const parsed = { width: readDimension(widthMatch?.[1]), height: readDimension(heightMatch?.[1]) };
 
-  // Parse width and height attributes
-  if (widthMatch?.[1]) {
-    const widthDim = parseDimension(widthMatch[1]);
-    if (widthDim) {
-      width = convertToPixels(widthDim.value, widthDim.unit);
-      wUnits = widthDim.unit === '' ? 'px' : widthDim.unit;
-    }
-  }
-
-  if (heightMatch?.[1]) {
-    const heightDim = parseDimension(heightMatch[1]);
-    if (heightDim) {
-      height = convertToPixels(heightDim.value, heightDim.unit);
-      hUnits = heightDim.unit === '' ? 'px' : heightDim.unit;
-    }
-  }
+  let width = parsed.width?.pixels;
+  let height = parsed.height?.pixels;
+  let wUnits = parsed.width?.unit ?? 'px';
+  let hUnits = parsed.height?.unit ?? 'px';
 
   // Fall back to viewBox if width/height not found
   if ((width === undefined || height === undefined) && viewBoxMatch?.[1]) {
     const viewBoxDims = parseViewBox(viewBoxMatch[1]);
     if (viewBoxDims) {
-      width = width ?? viewBoxDims.width;
-      height = height ?? viewBoxDims.height;
+      width ??= viewBoxDims.width;
+      height ??= viewBoxDims.height;
       wUnits = 'px';
       hUnits = 'px';
     }
   }
 
-  // Default dimensions if nothing found
-  if (width === undefined || height === undefined) {
-    width = width ?? 300; // SVG default width
-    height = height ?? 150; // SVG default height
+  width ??= 300; // SVG default width
+  height ??= 150; // SVG default height
+
+  if (width <= 0 || height <= 0) {
+    return null;
   }
 
-  if (width > 0 && height > 0) {
-    return {
-      width: Math.round(width),
-      height: Math.round(height),
-      type: 'svg',
-      mime: 'image/svg+xml',
-      wUnits,
-      hUnits,
-    };
-  }
-
-  return null;
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+    type: 'svg',
+    mime: 'image/svg+xml',
+    wUnits,
+    hUnits,
+  };
 }

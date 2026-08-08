@@ -12,24 +12,27 @@ export class BufferReader {
   }
 
   /**
+   * Throw unless `bytes` more bytes are available
+   */
+  private require(bytes: number): void {
+    if (this.position + bytes > this.buffer.length) {
+      throw new Error('Attempt to read past buffer');
+    }
+  }
+
+  /**
    * Read unsigned 8-bit integer
    */
   readUInt8(): number {
-    if (this.position >= this.buffer.length) {
-      throw new Error('Attempt to read past buffer');
-    }
-    const value = this.buffer[this.position];
-    this.position++;
-    return value ?? 0;
+    this.require(1);
+    return this.buffer[this.position++] ?? 0;
   }
 
   /**
    * Read unsigned 16-bit integer
    */
   readUInt16(): number {
-    if (this.position + 2 > this.buffer.length) {
-      throw new Error('Attempt to read past buffer');
-    }
+    this.require(2);
     const value = this.littleEndian
       ? this.buffer.readUInt16LE(this.position)
       : this.buffer.readUInt16BE(this.position);
@@ -41,9 +44,7 @@ export class BufferReader {
    * Read unsigned 32-bit integer
    */
   readUInt32(): number {
-    if (this.position + 4 > this.buffer.length) {
-      throw new Error('Attempt to read past buffer');
-    }
+    this.require(4);
     const value = this.littleEndian
       ? this.buffer.readUInt32LE(this.position)
       : this.buffer.readUInt32BE(this.position);
@@ -55,9 +56,7 @@ export class BufferReader {
    * Read signed 32-bit integer
    */
   readInt32(): number {
-    if (this.position + 4 > this.buffer.length) {
-      throw new Error('Attempt to read past buffer');
-    }
+    this.require(4);
     const value = this.littleEndian
       ? this.buffer.readInt32LE(this.position)
       : this.buffer.readInt32BE(this.position);
@@ -69,9 +68,7 @@ export class BufferReader {
    * Read string
    */
   readString(length: number, encoding: BufferEncoding = 'utf8'): string {
-    if (this.position + length > this.buffer.length) {
-      throw new Error('Attempt to read past buffer');
-    }
+    this.require(length);
     const str = this.buffer.toString(encoding, this.position, this.position + length);
     this.position += length;
     return str;
@@ -100,9 +97,7 @@ export class BufferReader {
    * Read bytes as Buffer
    */
   readBytes(length: number): Buffer {
-    if (this.position + length > this.buffer.length) {
-      throw new Error('Attempt to read past buffer');
-    }
+    this.require(length);
     const bytes = this.buffer.subarray(this.position, this.position + length);
     this.position += length;
     return bytes;

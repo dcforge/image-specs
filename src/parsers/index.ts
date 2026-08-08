@@ -15,35 +15,24 @@ import { detectFormat, getAllParsers } from '../utils/detector.js';
  * Falls back to trying all parsers if detection fails
  */
 export function parseImage(buffer: Buffer): ParseResult | null {
-  // First, try to detect the format and use the specific parser
-  const detectedParser = detectFormat(buffer);
-  if (detectedParser) {
+  const detected = detectFormat(buffer);
+
+  // Detection only sniffs a short prefix, so fall back to every parser for
+  // files whose marker sits outside that window (e.g. an SVG preceded by more
+  // than a kilobyte of comments)
+  const candidates = detected ? [detected, ...getAllParsers()] : getAllParsers();
+
+  for (const parse of candidates) {
     try {
-      const result = detectedParser(buffer);
+      const result = parse(buffer);
       if (result) {
         return result;
       }
     } catch {
-      // If detected parser fails, continue with fallback
+      // Try the next parser
     }
   }
 
-  // Fallback: try all parsers (for edge cases where detection might fail)
-  const allParsers = getAllParsers();
-  for (const parser of allParsers) {
-    // Skip the already tried parser
-    if (parser === detectedParser) continue;
-
-    try {
-      const result = parser(buffer);
-      if (result) {
-        return result;
-      }
-    } catch {
-      // Continue with next parser if current one fails
-      continue;
-    }
-  }
   return null;
 }
 

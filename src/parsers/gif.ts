@@ -1,5 +1,5 @@
 import type { ParseResult } from '../types.js';
-import { BufferReader } from '../utils/index.js';
+import { BufferReader } from '../utils/buffer-reader.js';
 
 /**
  * Parse GIF image format
