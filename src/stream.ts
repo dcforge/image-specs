@@ -22,9 +22,20 @@ export async function readStreamWithTimeout(
       stream.removeListener('data', onData);
       stream.removeListener('end', onEnd);
       stream.removeListener('error', onError);
-      // Resume stream to prevent hanging if paused
-      if (stream.isPaused()) {
-        stream.resume();
+    };
+
+    /**
+     * Abandon the source once we have what we need. Pausing is not enough: the
+     * stream would sit half-read holding its socket or file handle open, and
+     * anything still flowing would be downloaded only to be discarded.
+     */
+    const stop = (): void => {
+      cleanup();
+      if (!stream.destroyed) {
+        // Our error listener is gone by now, and an unhandled 'error' during
+        // teardown would take down the process
+        stream.on('error', () => undefined);
+        stream.destroy();
       }
     };
 
@@ -32,13 +43,10 @@ export async function readStreamWithTimeout(
       chunks.push(chunk);
       totalLength += chunk.length;
 
-      // Stop reading if we've reached maxBytes
+      // Stop reading once we have maxBytes
       if (totalLength >= maxBytes) {
-        // Pause to prevent buffering excess data
-        stream.pause();
-        cleanup();
-        const buffer = Buffer.concat(chunks);
-        resolve(buffer.subarray(0, maxBytes));
+        stop();
+        resolve(Buffer.concat(chunks).subarray(0, maxBytes));
       }
     };
 
@@ -57,11 +65,7 @@ export async function readStreamWithTimeout(
     };
 
     const onTimeout = (): void => {
-      cleanup();
-      // Destroy stream on timeout to prevent hanging
-      if (!stream.destroyed) {
-        stream.destroy();
-      }
+      stop();
       reject(new ImageSpecsError('Stream read timeout', ErrorCodes.TIMEOUT));
     };
 

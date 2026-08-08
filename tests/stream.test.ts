@@ -42,6 +42,29 @@ describe('Stream Utilities', () => {
       expect(result).toEqual(Buffer.from('This is a '));
     });
 
+    it('should stop pulling from the source once maxBytes is reached', async () => {
+      const total = 2000;
+      let produced = 0;
+      const stream = new Readable({
+        read() {
+          if (produced >= total) {
+            this.push(null);
+            return;
+          }
+          produced += 100;
+          this.push(Buffer.alloc(100, 0x61));
+        },
+      });
+
+      const result = await readStreamWithTimeout(stream, 100, 1000);
+
+      expect(result).toHaveLength(100);
+      expect(stream.destroyed).toBe(true);
+      // Node fills its internal buffer a little ahead of the first 'data'
+      // event, but the source must not be drained to the end
+      expect(produced).toBeLessThan(total);
+    });
+
     it('should handle stream end', async () => {
       const data = Buffer.from('Short');
       const stream = Readable.from(data);
