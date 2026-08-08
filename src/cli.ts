@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import process from 'process';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { readFileSync, realpathSync } from 'fs';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join } from 'path';
 import { getImageSpecs, getImageSpecsBatch, isImageSource, ImageSpecsError } from './index.js';
 import type { ImageSpecs, ImageSpecsOptions, ImageSource } from './types.js';
@@ -85,7 +85,7 @@ EXAMPLES:
 /**
  * Parse command line arguments
  */
-function parseArgs(args: string[]): { options: CliOptions; sources: string[] } {
+export function parseArgs(args: string[]): { options: CliOptions; sources: string[] } {
   const options: CliOptions = {};
   const sources: string[] = [];
 
@@ -128,7 +128,8 @@ function parseArgs(args: string[]): { options: CliOptions; sources: string[] } {
         throw new Error('--user-agent requires a value');
       }
       options.userAgent = value;
-    } else if (arg.startsWith('-')) {
+    } else if (arg !== '-' && arg.startsWith('-')) {
+      // A bare '-' is the stdin source, not an option
       throw new Error(`Unknown option: ${arg}`);
     } else {
       sources.push(arg);
@@ -156,8 +157,7 @@ async function getImageSource(input: string): Promise<ImageSource> {
 }
 
 type BatchResult =
-  | { success: true; specs: ImageSpecs }
-  | { success: false; error: ImageSpecsError };
+  { success: true; specs: ImageSpecs } | { success: false; error: ImageSpecsError };
 
 /**
  * Format single ImageSpecs output
@@ -317,10 +317,28 @@ async function main(): Promise<void> {
   }
 }
 
-// Run CLI if this file is executed directly (ESM)
-const isMainModule = import.meta.url === `file://${process.argv[1]}`;
+/**
+ * True when this module is the process entry point.
+ *
+ * `import.meta.url` is always a fully resolved, percent-encoded file URL, so
+ * argv[1] has to be normalised the same way before comparing: npm installs bin
+ * entries as symlinks (hence realpathSync) and a plain `file://${path}`
+ * template leaves spaces unencoded.
+ */
+function isEntryPoint(): boolean {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
 
-if (isMainModule) {
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) {
   main().catch((error) => {
     console.error('Unexpected error:', error);
     process.exit(1);
