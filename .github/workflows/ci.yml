@@ -46,8 +46,7 @@ jobs:
       - name: Verify installed package
         run: |
           PACKAGE_TARBALL=$(npm pack --silent)
-          SMOKE_DIR="$PWD/.package-smoke"
-          mkdir -p "$SMOKE_DIR"
+          SMOKE_DIR=$(mktemp -d)
           cd "$SMOKE_DIR"
           npm init -y >/dev/null
           npm install "$GITHUB_WORKSPACE/$PACKAGE_TARBALL" --ignore-scripts
@@ -106,8 +105,7 @@ jobs:
         run: |
           PACKAGE_TARBALL=$(npm pack --silent)
           PACKAGE_PATH=$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$PACKAGE_TARBALL")
-          SMOKE_DIR="$PWD/.package-smoke"
-          mkdir -p "$SMOKE_DIR"
+          SMOKE_DIR=$(mktemp -d)
           cd "$SMOKE_DIR"
           npm init -y >/dev/null
           npm install "$PACKAGE_PATH" --ignore-scripts
