@@ -104,6 +104,10 @@ export async function fetchImageHeaders(
       void handleRedirect(statusCode, headers.location, url, opts, fetchImageHeaders)
         .then((redirectResult) => {
           if (redirectResult) {
+            // Release the redirect response's socket rather than leaving it
+            // half-read; nothing is listening for its teardown errors
+            response.on('error', () => undefined);
+            response.destroy();
             resolve(redirectResult);
             return;
           }
