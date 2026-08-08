@@ -18,7 +18,9 @@ interface MockResponse extends Readable {
 
 describe('HTTP Utilities', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // resetAllMocks, not clearAllMocks — clearing only wipes call history, leaving
+    // implementations set by earlier tests in place to leak into later ones.
+    vi.resetAllMocks();
   });
 
   describe('fetchImageHeaders', () => {
