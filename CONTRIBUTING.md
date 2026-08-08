@@ -44,7 +44,7 @@ This project adheres to a Code of Conduct that all contributors are expected to 
 
 ### Prerequisites
 
-- Node.js 18.x or higher
+- Node.js 22.22.1 or higher
 - npm, yarn, or pnpm
 - Git
 

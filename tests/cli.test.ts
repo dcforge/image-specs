@@ -43,4 +43,13 @@ describe('CLI argument parsing', () => {
     expect(() => parseArgs(['--max-bytes', 'abc'])).toThrow('--max-bytes requires a numeric value');
     expect(() => parseArgs(['--user-agent'])).toThrow('--user-agent requires a value');
   });
+
+  it('should reject numeric limits that are not positive safe integers', () => {
+    for (const value of ['0', '-1', '1.5', 'Infinity', String(Number.MAX_SAFE_INTEGER + 1)]) {
+      expect(() => parseArgs(['--timeout', value])).toThrow('--timeout requires a numeric value');
+      expect(() => parseArgs(['--max-bytes', value])).toThrow(
+        '--max-bytes requires a numeric value'
+      );
+    }
+  });
 });

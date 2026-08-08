@@ -101,19 +101,9 @@ export function parseArgs(args: string[]): { options: CliOptions; sources: strin
     } else if (arg === '--silent') {
       options.silent = true;
     } else if (arg === '--timeout') {
-      i++;
-      const value = args[i];
-      if (!value || isNaN(Number(value))) {
-        throw new Error('--timeout requires a numeric value');
-      }
-      options.timeout = Number(value);
+      options.timeout = parsePositiveInteger(args[++i], '--timeout');
     } else if (arg === '--max-bytes') {
-      i++;
-      const value = args[i];
-      if (!value || isNaN(Number(value))) {
-        throw new Error('--max-bytes requires a numeric value');
-      }
-      options.maxBytes = Number(value);
+      options.maxBytes = parsePositiveInteger(args[++i], '--max-bytes');
     } else if (arg === '--user-agent') {
       i++;
       const value = args[i];
@@ -130,6 +120,14 @@ export function parseArgs(args: string[]): { options: CliOptions; sources: strin
   }
 
   return { options, sources };
+}
+
+function parsePositiveInteger(value: string | undefined, option: string): number {
+  const parsed = Number(value);
+  if (!value || !Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${option} requires a numeric value`);
+  }
+  return parsed;
 }
 
 /**
@@ -249,12 +247,12 @@ async function main(): Promise<void> {
     // Handle help and version
     if (options.help) {
       process.stdout.write(`${HELP_TEXT}\n`);
-      process.exit(0);
+      return;
     }
 
     if (options.version) {
       process.stdout.write(`${PACKAGE_VERSION}\n`);
-      process.exit(0);
+      return;
     }
 
     // Validate sources
@@ -301,7 +299,7 @@ async function main(): Promise<void> {
     const prefix = error instanceof ImageSpecsError ? `Error [${error.code}]` : 'Error';
 
     logError(`${prefix}: ${message}`, options);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
@@ -329,6 +327,6 @@ function isEntryPoint(): boolean {
 if (isEntryPoint()) {
   main().catch((error) => {
     console.error('Unexpected error:', error);
-    process.exit(1);
+    process.exitCode = 1;
   });
 }
