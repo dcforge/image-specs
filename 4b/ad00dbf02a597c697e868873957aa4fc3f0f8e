@@ -1,0 +1,21 @@
+src/stream.ts
+  s_5329b99a88578e::t_d0db6fd683f1a4 25-38,46,48-49,68
+tests/stream.test.ts
+  s_5329b99a88578e::t_b440d05e6c29d5 45-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "4bad00dbf02a597c697e868873957aa4fc3f0f8e",
+  "prompts": {},
+  "sessions": {
+    "s_5329b99a88578e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "67a350a4-ecc4-41f7-adb7-a13234452549",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raymond De Castro <raymond@decastro.ph>"
+    }
+  }
+}
