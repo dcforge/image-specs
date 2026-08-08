@@ -1,26 +1,16 @@
 import { type Readable } from 'stream';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 
 /**
- * Get package version dynamically
+ * Package metadata, replaced at build time by tsup (and by vitest when running
+ * tests). Reading package.json at runtime instead would resolve to the wrong
+ * path in the CJS bundle and fail outright once the bundle is shipped without
+ * its manifest.
  */
-function getPackageVersion(): string {
-  try {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    const packageJson = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8')) as {
-      version: string;
-    };
-    return packageJson.version;
-  } catch {
-    // Fallback for environments where package.json is not accessible
-    return '1.0.0';
-  }
-}
+declare const __PACKAGE_NAME__: string;
+declare const __PACKAGE_VERSION__: string;
 
-export const PACKAGE_VERSION = getPackageVersion();
+export const PACKAGE_NAME = __PACKAGE_NAME__;
+export const PACKAGE_VERSION = __PACKAGE_VERSION__;
 
 /**
  * Image specifications extracted from an image file
@@ -75,18 +65,6 @@ export interface ImageSpecsOptions {
 }
 
 /**
- * Image format information
- */
-export interface ImageFormat {
-  /** File extension */
-  ext: string;
-  /** MIME type */
-  mime: string;
-  /** Magic bytes for format detection */
-  signature: Buffer | Buffer[];
-}
-
-/**
  * Parser result containing image dimensions and metadata
  */
 export interface ParseResult {
@@ -116,6 +94,24 @@ export interface ParseResult {
   bitDepth?: number;
   /** Number of color channels */
   channels?: number;
+}
+
+/**
+ * Every key optional, with `undefined` removed from each value type
+ */
+type Defined<T> = { [K in keyof T]?: Exclude<T[K], undefined> };
+
+/**
+ * Drop keys whose value is `undefined`.
+ *
+ * `exactOptionalPropertyTypes` rejects an explicit `undefined` on an optional
+ * property, so optional metadata is collected in one object literal and spread
+ * through this helper instead of being assigned key by key.
+ */
+export function defined<T extends object>(obj: T): Defined<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined)
+  ) as Defined<T>;
 }
 
 /**
@@ -165,49 +161,3 @@ export const DEFAULT_OPTIONS: Required<ImageSpecsOptions> = {
   maxBytes: 65536, // 64KB
   userAgent: `image-specs/${PACKAGE_VERSION}`,
 };
-
-/**
- * Supported image formats with their signatures
- */
-export const SUPPORTED_FORMATS: readonly ImageFormat[] = [
-  {
-    ext: 'jpg',
-    mime: 'image/jpeg',
-    signature: Buffer.from([0xff, 0xd8, 0xff]),
-  },
-  {
-    ext: 'png',
-    mime: 'image/png',
-    signature: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  },
-  {
-    ext: 'gif',
-    mime: 'image/gif',
-    signature: [Buffer.from('GIF87a'), Buffer.from('GIF89a')],
-  },
-  {
-    ext: 'webp',
-    mime: 'image/webp',
-    signature: Buffer.from('WEBP', 'ascii'),
-  },
-  {
-    ext: 'bmp',
-    mime: 'image/bmp',
-    signature: Buffer.from([0x42, 0x4d]),
-  },
-  {
-    ext: 'svg',
-    mime: 'image/svg+xml',
-    signature: Buffer.from('<svg'),
-  },
-  {
-    ext: 'avif',
-    mime: 'image/avif',
-    signature: Buffer.from('ftypavif'),
-  },
-  {
-    ext: 'ico',
-    mime: 'image/x-icon',
-    signature: Buffer.from([0x00, 0x00, 0x01, 0x00]),
-  },
-] as const;

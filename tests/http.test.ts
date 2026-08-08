@@ -1,290 +1,245 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Readable } from 'stream';
-import http from 'http';
-import https from 'https';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { type Readable } from 'stream';
 import { fetchImageHeaders } from '../src/http.js';
-import { ImageSpecsError } from '../src/types.js';
+import { ErrorCodes, type ImageSpecsOptions } from '../src/types.js';
 
-// Mock http and https modules
-vi.mock('http');
-vi.mock('https');
+async function readAll(stream: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
 
-// Create a proper mock response type that extends Readable with HTTP response properties
-interface MockResponse extends Readable {
-  statusCode?: number;
-  statusMessage?: string;
-  headers?: Record<string, string | string[]>;
+function stubFetch(...responses: Response[]): ReturnType<typeof vi.fn<typeof fetch>> {
+  const fetchMock = vi.fn<typeof fetch>();
+  for (const response of responses) {
+    fetchMock.mockResolvedValueOnce(response);
+  }
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+function cancellableResponse(
+  status: number,
+  headers?: HeadersInit
+): { response: Response; wasCancelled: () => boolean } {
+  let cancelled = false;
+  const body = new ReadableStream({
+    cancel() {
+      cancelled = true;
+    },
+  });
+  return {
+    response: new Response(body, headers ? { status, headers } : { status }),
+    wasCancelled: () => cancelled,
+  };
 }
 
 describe('HTTP Utilities', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   describe('fetchImageHeaders', () => {
-    it('should fetch image from HTTP URL', async () => {
-      const mockResponse = new Readable() as MockResponse;
-      mockResponse.statusCode = 200;
-      mockResponse.statusMessage = 'OK';
-      mockResponse.headers = { 'content-type': 'image/jpeg' };
-
-      const mockRequest = {
-        on: vi.fn(),
-        end: vi.fn(),
-      };
-
-      vi.mocked(http.request).mockImplementation(((...args: any[]) => {
-        const callback = args[args.length - 1];
-        if (typeof callback === 'function') {
-          setTimeout(() => callback(mockResponse as any), 0);
-        }
-        return mockRequest as any;
-      }) as any);
-
-      const promise = fetchImageHeaders('http://example.com/image.jpg');
-
-      // Simulate successful request
-      setTimeout(() => {
-        mockResponse.emit('end');
-      }, 10);
-
-      const result = await promise;
-
-      expect(result.stream).toBe(mockResponse);
-      expect(result.statusCode).toBe(200);
-      expect(result.url).toBe('http://example.com/image.jpg');
-    });
-
-    it('should fetch image from HTTPS URL', async () => {
-      const mockResponse = new Readable() as MockResponse;
-      mockResponse.statusCode = 200;
-      mockResponse.headers = { 'content-type': 'image/png' };
-
-      const mockRequest = {
-        on: vi.fn(),
-        end: vi.fn(),
-      };
-
-      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
-        const callback = args[args.length - 1];
-        if (typeof callback === 'function') {
-          setTimeout(() => callback(mockResponse as any), 0);
-        }
-        return mockRequest as any;
-      }) as any);
-
-      const promise = fetchImageHeaders('https://example.com/image.png');
-
-      setTimeout(() => {
-        mockResponse.emit('end');
-      }, 10);
-
-      const result = await promise;
-
-      expect(result.stream).toBe(mockResponse);
-      expect(result.statusCode).toBe(200);
-    });
-
-    it('should handle redirects', async () => {
-      const redirectResponse = new Readable() as MockResponse;
-      redirectResponse.statusCode = 302;
-      redirectResponse.headers = { location: 'https://redirect.com/image.jpg' };
-
-      const finalResponse = new Readable() as MockResponse;
-      finalResponse.statusCode = 200;
-      finalResponse.headers = { 'content-type': 'image/jpeg' };
-
-      const mockRequest = {
-        on: vi.fn(),
-        end: vi.fn(),
-      };
-
-      let requestCount = 0;
-      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
-        requestCount++;
-        const callback = args[args.length - 1];
-        if (typeof callback === 'function') {
-          if (requestCount === 1) {
-            setTimeout(() => callback(redirectResponse as any), 0);
-          } else {
-            setTimeout(() => callback(finalResponse as any), 0);
-          }
-        }
-        return mockRequest as any;
-      }) as any);
-
-      const promise = fetchImageHeaders('https://example.com/image.jpg');
-
-      setTimeout(() => {
-        finalResponse.emit('end');
-      }, 20);
-
-      const result = await promise;
-      expect(result.statusCode).toBe(200);
-    });
-
-    it('should handle HTTP errors', async () => {
-      const mockResponse = new Readable() as MockResponse;
-      mockResponse.statusCode = 404;
-      mockResponse.statusMessage = 'Not Found';
-      mockResponse.headers = {}; // Add headers property
-
-      const mockRequest = {
-        on: vi.fn(),
-        end: vi.fn(),
-      };
-
-      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
-        const callback = args[args.length - 1];
-        if (typeof callback === 'function') {
-          setTimeout(() => callback(mockResponse as any), 0);
-        }
-        return mockRequest as any;
-      }) as any);
-
-      await expect(fetchImageHeaders('https://example.com/notfound.jpg')).rejects.toThrow(
-        ImageSpecsError
+    it.each([200, 206])('accepts a %i response as a Node stream', async (status) => {
+      const fetchMock = stubFetch(
+        new Response(Uint8Array.from([1, 2, 3]), {
+          status,
+          headers: { 'Content-Type': 'image/jpeg' },
+        })
       );
+
+      const result = await fetchImageHeaders('http://example.com/image.jpg');
+
+      expect(result).toMatchObject({
+        statusCode: status,
+        url: 'http://example.com/image.jpg',
+        headers: { 'content-type': 'image/jpeg' },
+      });
+      expect(await readAll(result.stream)).toEqual(Buffer.from([1, 2, 3]));
+      expect(fetchMock).toHaveBeenCalledOnce();
     });
 
-    it('should handle request errors', async () => {
-      const mockRequest = {
-        on: vi.fn((event, callback) => {
-          if (event === 'error') {
-            setTimeout(() => callback(new Error('Network error')), 0);
-          }
-        }),
-        end: vi.fn(),
-      };
+    it('sends range and custom request headers with manual redirects', async () => {
+      const fetchMock = stubFetch(new Response(Uint8Array.from([1]), { status: 200 }));
 
-      vi.mocked(https.request).mockReturnValue(mockRequest as any);
-
-      await expect(fetchImageHeaders('https://example.com/image.jpg')).rejects.toThrow(
-        ImageSpecsError
-      );
-    });
-
-    it('should handle timeout', async () => {
-      const mockRequest = {
-        on: vi.fn((event, callback) => {
-          if (event === 'timeout') {
-            setTimeout(() => callback(), 0);
-          }
-        }),
-        end: vi.fn(),
-        destroy: vi.fn(),
-      };
-
-      vi.mocked(https.request).mockReturnValue(mockRequest as any);
-
-      await expect(fetchImageHeaders('https://example.com/image.jpg')).rejects.toThrow(
-        ImageSpecsError
-      );
-    });
-
-    it('should reject invalid URLs', async () => {
-      await expect(fetchImageHeaders('invalid-url')).rejects.toThrow(ImageSpecsError);
-      await expect(fetchImageHeaders('ftp://example.com/file')).rejects.toThrow(ImageSpecsError);
-    });
-
-    it('should use custom options', async () => {
-      const mockResponse = new Readable() as MockResponse;
-      mockResponse.statusCode = 200;
-      mockResponse.headers = {};
-
-      const mockRequest = {
-        on: vi.fn(),
-        end: vi.fn(),
-      };
-
-      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
-        const options = args[0];
-        const callback = args[args.length - 1];
-        expect(options).toMatchObject({
-          headers: expect.objectContaining({
-            'User-Agent': 'custom-agent',
-            'Custom-Header': 'value',
-          }),
-          timeout: 5000,
-        });
-        if (typeof callback === 'function') {
-          setTimeout(() => callback(mockResponse as any), 0);
-        }
-        return mockRequest as any;
-      }) as any);
-
-      const promise = fetchImageHeaders('https://example.com/image.jpg', {
+      await fetchImageHeaders('https://example.com/image.png', {
         timeout: 5000,
+        maxBytes: 1024,
         userAgent: 'custom-agent',
         headers: { 'Custom-Header': 'value' },
       });
 
-      setTimeout(() => {
-        mockResponse.emit('end');
-      }, 10);
-
-      await promise;
+      const [, request] = fetchMock.mock.calls[0]!;
+      const headers = request?.headers as Headers;
+      expect(request).toMatchObject({ redirect: 'manual' });
+      expect(headers.get('user-agent')).toBe('custom-agent');
+      expect(headers.get('custom-header')).toBe('value');
+      expect(headers.get('range')).toBe('bytes=0-1023');
+      expect(headers.get('accept-encoding')).toBe('identity');
     });
 
-    it('should include Range header for partial content', async () => {
-      const mockResponse = new Readable() as MockResponse;
-      mockResponse.statusCode = 206; // Partial content
-      mockResponse.headers = { 'content-range': 'bytes 0-65535/100000' };
+    it('allows custom headers to override defaults case-insensitively', async () => {
+      const fetchMock = stubFetch(new Response(Uint8Array.from([1]), { status: 200 }));
 
-      const mockRequest = {
-        on: vi.fn(),
-        end: vi.fn(),
-      };
+      await fetchImageHeaders('https://example.com/image.png', {
+        headers: { range: 'bytes=0-7', 'user-agent': 'header-agent' },
+      });
 
-      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
-        const options = args[0];
-        const callback = args[args.length - 1];
-        expect(options).toMatchObject({
-          headers: expect.objectContaining({
-            Range: expect.stringMatching(/^bytes=0-\d+$/),
-          }),
+      const headers = fetchMock.mock.calls[0]![1]?.headers as Headers;
+      expect(headers.get('range')).toBe('bytes=0-7');
+      expect(headers.get('user-agent')).toBe('header-agent');
+    });
+
+    it('uses defaults when optional values are explicitly undefined', async () => {
+      const fetchMock = stubFetch(new Response(Uint8Array.from([1]), { status: 200 }));
+
+      const options = {
+        timeout: undefined,
+        headers: undefined,
+        maxBytes: undefined,
+        userAgent: undefined,
+      } as unknown as ImageSpecsOptions;
+      await fetchImageHeaders('https://example.com/image.png', options);
+
+      const headers = fetchMock.mock.calls[0]![1]?.headers as Headers;
+      expect(headers.get('range')).toBe('bytes=0-65535');
+      expect(headers.get('user-agent')).toMatch(/^image-specs\//);
+    });
+
+    it('follows relative redirects and cancels their bodies', async () => {
+      const redirect = cancellableResponse(302, { Location: '/final.jpg' });
+      const fetchMock = stubFetch(
+        redirect.response,
+        new Response(Uint8Array.from([1]), { status: 200 })
+      );
+
+      const result = await fetchImageHeaders('https://example.com/start.jpg');
+
+      expect(result.url).toBe('https://example.com/final.jpg');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(redirect.wasCancelled()).toBe(true);
+    });
+
+    it('strips sensitive headers from cross-origin redirects', async () => {
+      const redirect = cancellableResponse(302, { Location: 'https://cdn.example/image.jpg' });
+      const fetchMock = stubFetch(
+        redirect.response,
+        new Response(Uint8Array.from([1]), { status: 200 })
+      );
+
+      await fetchImageHeaders('https://example.com/image.jpg', {
+        headers: {
+          Authorization: 'Bearer secret',
+          Cookie: 'session=secret',
+          'Proxy-Authorization': 'proxy-secret',
+          Host: 'example.com',
+          'X-Keep': 'safe',
+        },
+      });
+
+      const redirectedHeaders = fetchMock.mock.calls[1]![1]?.headers as Headers;
+      expect(redirectedHeaders.get('authorization')).toBeNull();
+      expect(redirectedHeaders.get('cookie')).toBeNull();
+      expect(redirectedHeaders.get('proxy-authorization')).toBeNull();
+      expect(redirectedHeaders.get('host')).toBeNull();
+      expect(redirectedHeaders.get('x-keep')).toBe('safe');
+    });
+
+    it('keeps custom headers on same-origin redirects', async () => {
+      const redirect = cancellableResponse(302, { Location: '/final.jpg' });
+      const fetchMock = stubFetch(
+        redirect.response,
+        new Response(Uint8Array.from([1]), { status: 200 })
+      );
+
+      await fetchImageHeaders('https://example.com/image.jpg', {
+        headers: { Authorization: 'Bearer secret' },
+      });
+
+      const redirectedHeaders = fetchMock.mock.calls[1]![1]?.headers as Headers;
+      expect(redirectedHeaders.get('authorization')).toBe('Bearer secret');
+    });
+
+    it('rejects redirects to unsupported protocols after cancelling the body', async () => {
+      const redirect = cancellableResponse(302, { Location: 'file:///tmp/image.jpg' });
+      const fetchMock = stubFetch(redirect.response);
+
+      await expect(fetchImageHeaders('https://example.com/image.jpg')).rejects.toMatchObject({
+        code: ErrorCodes.INVALID_URL,
+      });
+      expect(redirect.wasCancelled()).toBe(true);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it('rejects after five redirects and cancels the final redirect body', async () => {
+      const redirects = Array.from({ length: 6 }, (_, index) =>
+        cancellableResponse(302, { Location: `/redirect-${index + 1}` })
+      );
+      const fetchMock = stubFetch(...redirects.map(({ response }) => response));
+
+      await expect(fetchImageHeaders('https://example.com/start')).rejects.toMatchObject({
+        code: ErrorCodes.NETWORK_ERROR,
+        message: 'Too many redirects',
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      expect(redirects.every(({ wasCancelled }) => wasCancelled())).toBe(true);
+    });
+
+    it('cancels unsuccessful response bodies and preserves the HTTP error', async () => {
+      const notFound = cancellableResponse(404);
+      stubFetch(notFound.response);
+
+      await expect(fetchImageHeaders('https://example.com/missing.jpg')).rejects.toMatchObject({
+        code: ErrorCodes.NETWORK_ERROR,
+        message: 'HTTP 404: Unknown error',
+      });
+      expect(notFound.wasCancelled()).toBe(true);
+    });
+
+    it('maps fetch failures to network errors', async () => {
+      const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new Error('socket failed'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(fetchImageHeaders('https://example.com/image.jpg')).rejects.toMatchObject({
+        code: ErrorCodes.NETWORK_ERROR,
+        message: 'Request error: socket failed',
+      });
+    });
+
+    it('times out while waiting for response headers', async () => {
+      vi.useFakeTimers();
+      const fetchMock = vi.fn<typeof fetch>((_url, init) => {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'));
+          });
         });
-        if (typeof callback === 'function') {
-          setTimeout(() => callback(mockResponse as any), 0);
-        }
-        return mockRequest as any;
-      }) as any);
+      });
+      vi.stubGlobal('fetch', fetchMock);
 
-      const promise = fetchImageHeaders('https://example.com/image.jpg');
-
-      setTimeout(() => {
-        mockResponse.emit('end');
-      }, 10);
-
-      await promise;
+      const request = fetchImageHeaders('https://example.com/image.jpg', { timeout: 100 });
+      const assertion = expect(request).rejects.toMatchObject({
+        code: ErrorCodes.TIMEOUT,
+        message: 'Request timeout',
+      });
+      await vi.advanceTimersByTimeAsync(101);
+      await assertion;
     });
 
-    it('should accept 200 response for full content', async () => {
-      const mockResponse = new Readable() as MockResponse;
-      mockResponse.statusCode = 200;
-      mockResponse.headers = {};
+    it('rejects invalid and unsupported URLs before fetching', async () => {
+      const fetchMock = vi.fn<typeof fetch>();
+      vi.stubGlobal('fetch', fetchMock);
 
-      const mockRequest = {
-        on: vi.fn(),
-        end: vi.fn(),
-      };
-
-      vi.mocked(https.request).mockImplementation(((...args: any[]) => {
-        const callback = args[args.length - 1];
-        if (typeof callback === 'function') {
-          setTimeout(() => callback(mockResponse as any), 0);
-        }
-        return mockRequest as any;
-      }) as any);
-
-      const promise = fetchImageHeaders('https://example.com/image.jpg');
-
-      setTimeout(() => {
-        mockResponse.emit('end');
-      }, 10);
-
-      const result = await promise;
-      expect(result.statusCode).toBe(200);
+      await expect(fetchImageHeaders('invalid-url')).rejects.toMatchObject({
+        code: ErrorCodes.INVALID_URL,
+      });
+      await expect(fetchImageHeaders('ftp://example.com/file')).rejects.toMatchObject({
+        code: ErrorCodes.INVALID_URL,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 });

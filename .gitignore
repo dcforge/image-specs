@@ -67,6 +67,7 @@ pnpm-debug.log*
 temp/
 tmp/
 .cache/
+node-compile-cache/
 
 # Debug files
 debug-*.js

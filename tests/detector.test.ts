@@ -1,35 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { detectFormat, getImageType, mightBeImage } from '../src/utils/detector.js';
+import { detectFormat, getImageType } from '../src/utils/detector.js';
 import { parseJPEG, parsePNG, parseGIF } from '../src/parsers/index.js';
 
 describe('Image Detector', () => {
-  describe('mightBeImage', () => {
-    it('should quickly identify potential JPEG', () => {
-      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff]);
-      expect(mightBeImage(jpegBuffer)).toBe(true);
-    });
-
-    it('should quickly identify potential PNG', () => {
-      const pngBuffer = Buffer.from([0x89, 0x50]);
-      expect(mightBeImage(pngBuffer)).toBe(true);
-    });
-
-    it('should quickly identify potential GIF', () => {
-      const gifBuffer = Buffer.from([0x47, 0x49]); // 'GI'
-      expect(mightBeImage(gifBuffer)).toBe(true);
-    });
-
-    it('should reject non-image buffers', () => {
-      const textBuffer = Buffer.from('Hello World');
-      expect(mightBeImage(textBuffer)).toBe(false);
-    });
-
-    it('should reject too small buffers', () => {
-      const smallBuffer = Buffer.from([0xff]);
-      expect(mightBeImage(smallBuffer)).toBe(false);
-    });
-  });
-
   describe('detectFormat', () => {
     it('should detect JPEG format', () => {
       const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);

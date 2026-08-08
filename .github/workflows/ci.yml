@@ -6,16 +6,15 @@ on:
   pull_request:
     branches: [main, develop]
 
-# Cancel in-progress runs for the same workflow and ref
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint
+  quality:
+    name: Quality
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -23,73 +22,37 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '22.22.1'
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run ESLint
-        run: npm run lint
-
-      - name: Check code formatting
-        run: npm run format:check
-
-  typecheck:
-    name: Type Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run TypeScript compiler
-        run: npm run typecheck
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build package
-        run: npm run build
+      - name: Check quality
+        run: |
+          npm run format:check
+          npm run lint
+          npm run typecheck
+          npm run build
 
       - name: Verify build artifacts
         run: |
-          test -f dist/index.js || (echo "ESM build missing" && exit 1)
-          test -f dist/index.cjs || (echo "CJS build missing" && exit 1)
-          test -f dist/index.d.ts || (echo "ESM types missing" && exit 1)
-          test -f dist/index.d.cts || (echo "CJS types missing" && exit 1)
-          test -f dist/cli.js || (echo "CLI binary missing" && exit 1)
-          echo "✅ All build artifacts present"
+          test -f dist/index.js
+          test -f dist/index.cjs
+          test -f dist/index.d.ts
+          test -f dist/index.d.cts
+          test -f dist/cli.js
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-artifacts
-          path: dist/
-          retention-days: 7
+      - name: Verify installed package
+        run: |
+          PACKAGE_TARBALL=$(npm pack --silent)
+          SMOKE_DIR=$(mktemp -d)
+          cd "$SMOKE_DIR"
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE/$PACKAGE_TARBALL" --ignore-scripts
+          node --input-type=module -e "const { getImageSpecs } = await import('@dcforge/image-specs'); if (typeof getImageSpecs !== 'function') process.exit(1)"
+          node -e "const { getImageSpecs } = require('@dcforge/image-specs'); if (typeof getImageSpecs !== 'function') process.exit(1)"
+          "$SMOKE_DIR/node_modules/.bin/image-specs" --version
 
   test:
     name: Test (Node ${{ matrix.node-version }} on ${{ matrix.os }})
@@ -98,14 +61,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ['18', '20', '22']
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        # Reduce matrix for PRs to speed up feedback
-        exclude:
-          - os: ${{ github.event_name == 'pull_request' && 'windows-latest' || 'none' }}
-            node-version: '18'
-          - os: ${{ github.event_name == 'pull_request' && 'macos-latest' || 'none' }}
-            node-version: '18'
+        include:
+          - os: ubuntu-latest
+            node-version: '22.22.1'
+            coverage: true
+          - os: ubuntu-latest
+            node-version: '24'
+            smoke: true
+          - os: windows-latest
+            node-version: '22.22.1'
+            smoke: true
+          - os: macos-latest
+            node-version: '22.22.1'
+            smoke: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -114,20 +82,39 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
 
       - name: Run tests
-        run: npm test -- --run --reporter=verbose
+        if: matrix.coverage != true
+        run: npm test -- --run
 
-      - name: Generate coverage report (Node 20 + Ubuntu only)
-        if: matrix.node-version == '20' && matrix.os == 'ubuntu-latest'
-        run: npm run test:coverage
+      - name: Run tests with coverage
+        if: matrix.coverage == true
+        run: npm run test:coverage -- --run
 
-      - name: Upload coverage to Codecov
-        if: matrix.node-version == '20' && matrix.os == 'ubuntu-latest'
+      - name: Build package for installation smoke test
+        if: matrix.smoke == true
+        run: npm run build
+
+      - name: Verify installed package
+        if: matrix.smoke == true
+        shell: bash
+        run: |
+          PACKAGE_TARBALL=$(npm pack --silent)
+          PACKAGE_PATH=$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$PACKAGE_TARBALL")
+          SMOKE_DIR=$(mktemp -d)
+          cd "$SMOKE_DIR"
+          npm init -y >/dev/null
+          npm install "$PACKAGE_PATH" --ignore-scripts
+          node --input-type=module -e "const { getImageSpecs } = await import('@dcforge/image-specs'); if (typeof getImageSpecs !== 'function') process.exit(1)"
+          node -e "const { getImageSpecs } = require('@dcforge/image-specs'); if (typeof getImageSpecs !== 'function') process.exit(1)"
+          npm exec -- image-specs --version
+
+      - name: Upload coverage
+        if: matrix.coverage == true
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage/coverage-final.json
@@ -136,91 +123,16 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
-  test-package:
-    name: Test Package Installation
-    runs-on: ubuntu-latest
-    needs: [build]
-    timeout-minutes: 10
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build package
-        run: npm run build
-
-      - name: Pack package
-        run: npm pack
-
-      - name: Test package installation
-        run: |
-          mkdir -p /tmp/test-install
-          cd /tmp/test-install
-          npm init -y
-          npm install ${{ github.workspace }}/dcforge-image-specs-*.tgz
-
-      - name: Test ESM import
-        run: |
-          cd /tmp/test-install
-          node -e "import('@dcforge/image-specs').then(m => console.log('✅ ESM import works:', typeof m.getImageSpecs))"
-
-      - name: Test CJS require
-        run: |
-          cd /tmp/test-install
-          node -e "const { getImageSpecs } = require('@dcforge/image-specs'); console.log('✅ CJS require works:', typeof getImageSpecs)"
-
-      - name: Test CLI binary
-        run: |
-          cd /tmp/test-install
-          npx image-specs --version
-
-  security:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Run npm audit
-        run: npm audit --audit-level=moderate
-        continue-on-error: true
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check for outdated dependencies
-        run: npm outdated || true
-
-  # Summary job to check if all required jobs passed
   ci-success:
     name: CI Success
+    needs: [quality, test]
     if: always()
-    needs: [lint, typecheck, build, test, test-package, security]
     runs-on: ubuntu-latest
     steps:
-      - name: Check all jobs status
+      - name: Verify required jobs
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TEST_RESULT: ${{ needs.test.result }}
         run: |
-          if [ "${{ needs.lint.result }}" != "success" ] || \
-             [ "${{ needs.typecheck.result }}" != "success" ] || \
-             [ "${{ needs.build.result }}" != "success" ] || \
-             [ "${{ needs.test.result }}" != "success" ] || \
-             [ "${{ needs.test-package.result }}" != "success" ]; then
-            echo "❌ One or more required jobs failed"
-            exit 1
-          fi
-          echo "✅ All CI checks passed successfully"
+          test "$QUALITY_RESULT" = "success"
+          test "$TEST_RESULT" = "success"

@@ -4,10 +4,94 @@ import {
   parsePNG,
   parseGIF,
   parseBMP,
+  parseWebP,
+  parseAVIF,
   parseSVG,
   parseICO,
   parseImage,
 } from '../src/parsers/index.js';
+
+function webPChunk(type: string, data: Buffer): Buffer {
+  const size = Buffer.alloc(4);
+  size.writeUInt32LE(data.length);
+  return Buffer.concat([Buffer.from(type), size, data, Buffer.alloc(data.length % 2)]);
+}
+
+function webP(...chunks: Buffer[]): Buffer {
+  const contents = Buffer.concat([Buffer.from('WEBP'), ...chunks]);
+  const size = Buffer.alloc(4);
+  size.writeUInt32LE(contents.length);
+  return Buffer.concat([Buffer.from('RIFF'), size, contents]);
+}
+
+function vp8(width: number, height: number): Buffer {
+  const data = Buffer.alloc(10);
+  data.set([0x9d, 0x01, 0x2a], 3);
+  data.writeUInt32LE((((height & 0x3fff) << 16) | (width & 0x3fff)) >>> 0, 6);
+  return data;
+}
+
+function vp8l(width: number, height: number): Buffer {
+  const data = Buffer.alloc(5);
+  data[0] = 0x2f;
+  data.writeUInt32LE((((height - 1) << 14) | (width - 1)) >>> 0, 1);
+  return data;
+}
+
+function vp8x(width: number, height: number, flags = 0): Buffer {
+  const data = Buffer.alloc(10);
+  data[0] = flags;
+  data.writeUIntLE(width - 1, 4, 3);
+  data.writeUIntLE(height - 1, 7, 3);
+  return data;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const size = Buffer.alloc(4);
+  size.writeUInt32BE(data.length);
+  return Buffer.concat([size, Buffer.from(type), data, Buffer.alloc(4)]);
+}
+
+function png(...chunks: Buffer[]): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(100, 0);
+  ihdr.writeUInt32BE(80, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    ...chunks,
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+function pngWithIccProfile(profileData: Buffer): Buffer {
+  return png(pngChunk('iCCP', profileData));
+}
+
+function isoBox(type: string, ...contents: Buffer[]): Buffer {
+  const data = Buffer.concat(contents);
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(header.length + data.length);
+  header.write(type, 4, 'ascii');
+  return Buffer.concat([header, data]);
+}
+
+function avifWithProperties(...properties: Buffer[]): Buffer {
+  return Buffer.concat([
+    isoBox('ftyp', Buffer.from('avif'), Buffer.alloc(4)),
+    isoBox('meta', Buffer.alloc(4), isoBox('iprp', isoBox('ipco', ...properties))),
+  ]);
+}
+
+function ispe(width: number, height: number): Buffer {
+  const data = Buffer.alloc(12);
+  data.writeUInt32BE(width, 4);
+  data.writeUInt32BE(height, 8);
+  return isoBox('ispe', data);
+}
 
 describe('Image Parsers', () => {
   describe('parseJPEG', () => {
@@ -143,6 +227,36 @@ describe('Image Parsers', () => {
         hResolution: 72,
       });
     });
+
+    it('should read an iCCP profile name up to its null terminator', () => {
+      const result = parsePNG(
+        pngWithIccProfile(Buffer.concat([Buffer.from('Display P3\0'), Buffer.from([0, 1, 2, 3])]))
+      );
+
+      expect(result?.iccProfile).toBe('Display P3');
+    });
+
+    it('should preserve an unterminated iCCP profile name', () => {
+      const result = parsePNG(pngWithIccProfile(Buffer.from('Unterminated profile', 'latin1')));
+
+      expect(result?.iccProfile).toBe('Unterminated profile');
+    });
+
+    it('should omit an empty iCCP profile name', () => {
+      const result = parsePNG(pngWithIccProfile(Buffer.from([0, 0, 1, 2, 3])));
+
+      expect(result).not.toHaveProperty('iccProfile');
+    });
+
+    it('should ignore a truncated chunk without reading beyond its declared bounds', () => {
+      const truncatedIcc = pngChunk('iCCP', Buffer.from('Profile'));
+      truncatedIcc.writeUInt32BE(100, 0);
+
+      const result = parsePNG(png(truncatedIcc));
+
+      expect(result).toMatchObject({ width: 100, height: 80 });
+      expect(result).not.toHaveProperty('iccProfile');
+    });
   });
 
   describe('parseGIF', () => {
@@ -234,6 +348,100 @@ describe('Image Parsers', () => {
     });
   });
 
+  describe('parseWebP', () => {
+    it('should parse VP8 dimensions', () => {
+      const result = parseWebP(webP(webPChunk('VP8 ', vp8(320, 256))));
+
+      expect(result).toMatchObject({ width: 320, height: 256, channels: 3 });
+    });
+
+    it('should parse VP8L dimensions and alpha support', () => {
+      const result = parseWebP(webP(webPChunk('VP8L', vp8l(321, 257))));
+
+      expect(result).toMatchObject({ width: 321, height: 257, channels: 4 });
+    });
+
+    it('should combine VP8X dimensions with a later ICC profile', () => {
+      const profile = Buffer.concat([Buffer.alloc(64), Buffer.from('Display P3')]);
+      const result = parseWebP(
+        webP(webPChunk('VP8X', vp8x(640, 480, 0x30)), webPChunk('ICCP', profile))
+      );
+
+      expect(result).toMatchObject({
+        width: 640,
+        height: 480,
+        channels: 4,
+        colorSpace: 'Display P3',
+        iccProfile: 'Display P3',
+      });
+    });
+
+    it('should keep dimensions and alpha from the first valid VP8X chunk', () => {
+      const result = parseWebP(
+        webP(webPChunk('VP8X', vp8x(640, 480, 0x10)), webPChunk('VP8X', vp8x(800, 600)))
+      );
+
+      expect(result).toMatchObject({ width: 640, height: 480, channels: 4 });
+    });
+
+    it('should skip a malformed VP8X chunk and use the next valid one', () => {
+      const result = parseWebP(
+        webP(webPChunk('VP8X', Buffer.alloc(9)), webPChunk('VP8X', vp8x(800, 600)))
+      );
+
+      expect(result).toMatchObject({ width: 800, height: 600, channels: 3 });
+    });
+
+    it('should return null for a truncated chunk', () => {
+      const malformedChunk = Buffer.concat([
+        Buffer.from('VP8X'),
+        Buffer.from([10, 0, 0, 0]),
+        Buffer.alloc(9),
+      ]);
+
+      expect(parseWebP(webP(malformedChunk))).toBeNull();
+    });
+  });
+
+  describe('parseAVIF', () => {
+    it('should find dimensions nested under meta, iprp, and ipco boxes', () => {
+      expect(parseAVIF(avifWithProperties(ispe(1920, 1080)))).toEqual({
+        width: 1920,
+        height: 1080,
+        type: 'avif',
+        mime: 'image/avif',
+        wUnits: 'px',
+        hUnits: 'px',
+      });
+    });
+
+    it('should reject an ispe payload truncated before its height', () => {
+      const truncated = Buffer.alloc(8);
+      truncated.writeUInt32BE(640, 4);
+
+      expect(
+        parseAVIF(avifWithProperties(isoBox('ispe', truncated), isoBox('free', Buffer.alloc(4))))
+      ).toBeNull();
+    });
+
+    it('should reject a box whose declared size extends past the file', () => {
+      const truncated = avifWithProperties(ispe(640, 480));
+      truncated.writeUInt32BE(truncated.length, 16); // meta starts after the 16-byte ftyp box
+
+      expect(parseAVIF(truncated)).toBeNull();
+    });
+
+    it('should reject a box smaller than its header', () => {
+      const invalidBox = Buffer.alloc(8);
+      invalidBox.writeUInt32BE(4);
+      invalidBox.write('meta', 4, 'ascii');
+
+      expect(
+        parseAVIF(Buffer.concat([isoBox('ftyp', Buffer.from('avif'), Buffer.alloc(4)), invalidBox]))
+      ).toBeNull();
+    });
+  });
+
   describe('parseSVG', () => {
     it('should parse SVG with width and height attributes', () => {
       const svgContent = '<svg width="320" height="256" xmlns="http://www.w3.org/2000/svg"></svg>';
@@ -285,6 +493,10 @@ describe('Image Parsers', () => {
       const result = parseSVG(invalidBuffer);
       expect(result).toBeNull();
     });
+
+    it('should preserve case-sensitive SVG detection', () => {
+      expect(parseSVG(Buffer.from('<SVG width="10" height="20"></SVG>'))).toBeNull();
+    });
   });
 
   describe('parseICO', () => {
@@ -318,6 +530,12 @@ describe('Image Parsers', () => {
       const invalidBuffer = Buffer.from([0x00, 0x00, 0x00, 0x00]);
       const result = parseICO(invalidBuffer);
       expect(result).toBeNull();
+    });
+
+    it('should reject a truncated icon directory', () => {
+      const truncated = Buffer.from([0, 0, 1, 0, 2, 0, ...Buffer.alloc(16)]);
+
+      expect(parseICO(truncated)).toBeNull();
     });
   });
 

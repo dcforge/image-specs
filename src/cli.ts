@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 import process from 'process';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { realpathSync } from 'fs';
+import { pathToFileURL } from 'url';
 import { getImageSpecs, getImageSpecsBatch, isImageSource, ImageSpecsError } from './index.js';
-import type { ImageSpecs, ImageSpecsOptions, ImageSource } from './types.js';
+import {
+  PACKAGE_NAME,
+  PACKAGE_VERSION,
+  type ImageSpecs,
+  type ImageSpecsOptions,
+  type ImageSource,
+} from './types.js';
 
 /**
  * CLI configuration
@@ -18,18 +23,6 @@ interface CliOptions extends ImageSpecsOptions {
   verbose?: boolean;
   silent?: boolean;
 }
-
-/**
- * Package information
- */
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const packageJson = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8')) as {
-  name: string;
-  version: string;
-};
-const PACKAGE_VERSION = packageJson.version;
-const PACKAGE_NAME = packageJson.name;
 
 /**
  * CLI help text
@@ -85,7 +78,7 @@ EXAMPLES:
 /**
  * Parse command line arguments
  */
-function parseArgs(args: string[]): { options: CliOptions; sources: string[] } {
+export function parseArgs(args: string[]): { options: CliOptions; sources: string[] } {
   const options: CliOptions = {};
   const sources: string[] = [];
 
@@ -108,19 +101,9 @@ function parseArgs(args: string[]): { options: CliOptions; sources: string[] } {
     } else if (arg === '--silent') {
       options.silent = true;
     } else if (arg === '--timeout') {
-      i++;
-      const value = args[i];
-      if (!value || isNaN(Number(value))) {
-        throw new Error('--timeout requires a numeric value');
-      }
-      options.timeout = Number(value);
+      options.timeout = parsePositiveInteger(args[++i], '--timeout');
     } else if (arg === '--max-bytes') {
-      i++;
-      const value = args[i];
-      if (!value || isNaN(Number(value))) {
-        throw new Error('--max-bytes requires a numeric value');
-      }
-      options.maxBytes = Number(value);
+      options.maxBytes = parsePositiveInteger(args[++i], '--max-bytes');
     } else if (arg === '--user-agent') {
       i++;
       const value = args[i];
@@ -128,7 +111,8 @@ function parseArgs(args: string[]): { options: CliOptions; sources: string[] } {
         throw new Error('--user-agent requires a value');
       }
       options.userAgent = value;
-    } else if (arg.startsWith('-')) {
+    } else if (arg !== '-' && arg.startsWith('-')) {
+      // A bare '-' is the stdin source, not an option
       throw new Error(`Unknown option: ${arg}`);
     } else {
       sources.push(arg);
@@ -138,26 +122,32 @@ function parseArgs(args: string[]): { options: CliOptions; sources: string[] } {
   return { options, sources };
 }
 
+function parsePositiveInteger(value: string | undefined, option: string): number {
+  const parsed = Number(value);
+  if (!value || !Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${option} requires a numeric value`);
+  }
+  return parsed;
+}
+
 /**
- * Get image source from input
+ * Resolve an input argument to an image source. Anything but `-` is passed
+ * through as a string for getImageSpecs to interpret as a URL or file path.
  */
-async function getImageSource(input: string): Promise<ImageSource> {
-  if (input === '-') {
-    // Validate stdin is readable
-    if (!process.stdin.readable) {
-      throw new Error('stdin is not readable');
-    }
-    // Read from stdin
-    return process.stdin;
-  } else {
-    // Return the string directly - getImageSpecs will handle files, URLs, etc.
+function getImageSource(input: string): ImageSource {
+  if (input !== '-') {
     return input;
   }
+
+  if (!process.stdin.readable) {
+    throw new Error('stdin is not readable');
+  }
+
+  return process.stdin;
 }
 
 type BatchResult =
-  | { success: true; specs: ImageSpecs }
-  | { success: false; error: ImageSpecsError };
+  { success: true; specs: ImageSpecs } | { success: false; error: ImageSpecsError };
 
 /**
  * Format single ImageSpecs output
@@ -257,12 +247,12 @@ async function main(): Promise<void> {
     // Handle help and version
     if (options.help) {
       process.stdout.write(`${HELP_TEXT}\n`);
-      process.exit(0);
+      return;
     }
 
     if (options.version) {
       process.stdout.write(`${PACKAGE_VERSION}\n`);
-      process.exit(0);
+      return;
     }
 
     // Validate sources
@@ -273,7 +263,7 @@ async function main(): Promise<void> {
     // Process sources
     if (options.batch && sources.length > 1) {
       // Batch processing
-      const imageSources = await Promise.all(sources.map(getImageSource));
+      const imageSources = sources.map(getImageSource);
 
       if (options.check) {
         const results = await Promise.all(
@@ -290,7 +280,7 @@ async function main(): Promise<void> {
       if (!source) {
         throw new Error('No sources provided. Use --help for usage information.');
       }
-      const imageSource = await getImageSource(source);
+      const imageSource = getImageSource(source);
 
       if (options.check) {
         const result = await isImageSource(imageSource, options);
@@ -306,23 +296,37 @@ async function main(): Promise<void> {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
+    const prefix = error instanceof ImageSpecsError ? `Error [${error.code}]` : 'Error';
 
-    if (error instanceof ImageSpecsError) {
-      logError(`Error [${error.code}]: ${message}`, options);
-      process.exit(1);
-    } else {
-      logError(`Error: ${message}`, options);
-      process.exit(1);
-    }
+    logError(`${prefix}: ${message}`, options);
+    process.exitCode = 1;
   }
 }
 
-// Run CLI if this file is executed directly (ESM)
-const isMainModule = import.meta.url === `file://${process.argv[1]}`;
+/**
+ * True when this module is the process entry point.
+ *
+ * `import.meta.url` is always a fully resolved, percent-encoded file URL, so
+ * argv[1] has to be normalised the same way before comparing: npm installs bin
+ * entries as symlinks (hence realpathSync) and a plain `file://${path}`
+ * template leaves spaces unencoded.
+ */
+function isEntryPoint(): boolean {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
 
-if (isMainModule) {
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) {
   main().catch((error) => {
     console.error('Unexpected error:', error);
-    process.exit(1);
+    process.exitCode = 1;
   });
 }

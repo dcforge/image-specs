@@ -1,12 +1,7 @@
-import { type Readable } from 'stream';
-import https from 'https';
-import http from 'http';
-import { URL } from 'url';
+import { Readable } from 'stream';
+import type { ReadableStream as NodeReadableStream } from 'stream/web';
 import { ImageSpecsError, ErrorCodes, type ImageSpecsOptions, DEFAULT_OPTIONS } from './types.js';
 
-/**
- * HTTP response interface
- */
 interface HttpResponse {
   stream: Readable;
   headers: Record<string, string | string[] | undefined>;
@@ -14,19 +9,12 @@ interface HttpResponse {
   url: string;
 }
 
-/**
- * Internal options with redirect tracking
- */
-interface InternalOptions extends ImageSpecsOptions {
-  redirectCount?: number;
-}
+const MAX_REDIRECTS = 5;
+const SENSITIVE_HEADERS = ['authorization', 'cookie', 'proxy-authorization', 'host'];
 
-/**
- * Validate URL format
- */
-function validateUrl(url: string): URL {
+function validateUrl(url: string | URL, base?: URL): URL {
   try {
-    const parsedUrl = new URL(url);
+    const parsedUrl = new URL(url, base);
     if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
       throw new Error('Only HTTP and HTTPS protocols are supported');
     }
@@ -39,118 +27,100 @@ function validateUrl(url: string): URL {
   }
 }
 
-/**
- * Handle HTTP redirects
- */
-async function handleRedirect(
-  statusCode: number,
-  location: string | string[] | undefined,
-  baseUrl: string,
-  options: InternalOptions,
-  fetchFunction: (url: string, opts: InternalOptions) => Promise<HttpResponse>
-): Promise<HttpResponse | null> {
-  if (statusCode >= 300 && statusCode < 400 && location) {
-    const locationStr = Array.isArray(location) ? location[0] : location;
-    if (!locationStr) {
-      return null;
-    }
-    const redirectUrl = new URL(locationStr, baseUrl).toString();
-    const maxRedirects = 5;
-    const redirectCount = options.redirectCount ?? 0;
-
-    if (redirectCount >= maxRedirects) {
-      throw new ImageSpecsError('Too many redirects', ErrorCodes.NETWORK_ERROR);
-    }
-
-    return fetchFunction(redirectUrl, { ...options, redirectCount: redirectCount + 1 });
+async function cancelBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Preserve the redirect or HTTP error that caused the cancellation.
   }
-  return null;
+}
+
+async function fetchWithTimeout(url: URL, headers: Headers, timeout: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    return await fetch(url, {
+      headers,
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new ImageSpecsError('Request timeout', ErrorCodes.TIMEOUT);
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ImageSpecsError(`Request error: ${message}`, ErrorCodes.NETWORK_ERROR);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
- * Fetch image content from URL with Range header support for efficient partial content fetching
+ * Fetch image content with a bounded range request.
  */
 export async function fetchImageHeaders(
   url: string,
   options: ImageSpecsOptions = {}
 ): Promise<HttpResponse> {
-  const parsedUrl = validateUrl(url);
-  const opts: InternalOptions = { ...DEFAULT_OPTIONS, ...options };
-
-  return new Promise<HttpResponse>((resolve, reject) => {
-    const isHttps = parsedUrl.protocol === 'https:';
-    const httpModule = isHttps ? https : http;
-
-    // Try range request for first few KB
-    const requestOptions = {
-      hostname: parsedUrl.hostname,
-      port: parsedUrl.port,
-      path: parsedUrl.pathname + parsedUrl.search,
-      method: 'GET',
-      headers: {
-        'User-Agent': opts.userAgent,
-        Accept: 'image/*,*/*;q=0.8',
-        'Accept-Encoding': 'identity',
-        Range: `bytes=0-${(opts.maxBytes ?? DEFAULT_OPTIONS.maxBytes) - 1}`,
-        ...opts.headers,
-      },
-      timeout: opts.timeout,
-    };
-
-    const request = httpModule.request(requestOptions, (response) => {
-      const { statusCode = 0, headers } = response;
-
-      // Handle redirects
-      void handleRedirect(statusCode, headers.location, url, opts, fetchImageHeaders)
-        .then((redirectResult) => {
-          if (redirectResult) {
-            resolve(redirectResult);
-            return;
-          }
-
-          // Accept both 200 (full content) and 206 (partial content)
-          if (statusCode !== 200 && statusCode !== 206) {
-            reject(
-              new ImageSpecsError(
-                `HTTP ${statusCode}: ${response.statusMessage ?? 'Unknown error'}`,
-                ErrorCodes.NETWORK_ERROR
-              )
-            );
-            return;
-          }
-
-          // No response-level timeout - let stream reading handle timeouts
-          response.on('error', (error: Error) => {
-            reject(
-              new ImageSpecsError(`Response error: ${error.message}`, ErrorCodes.NETWORK_ERROR)
-            );
-          });
-
-          resolve({
-            stream: response,
-            headers,
-            statusCode,
-            url,
-          });
-        })
-        .catch((error: unknown) => {
-          reject(
-            error instanceof Error
-              ? error
-              : new ImageSpecsError(String(error), ErrorCodes.NETWORK_ERROR)
-          );
-        });
-    });
-
-    request.on('error', (error: Error) => {
-      reject(new ImageSpecsError(`Request error: ${error.message}`, ErrorCodes.NETWORK_ERROR));
-    });
-
-    request.on('timeout', () => {
-      request.destroy();
-      reject(new ImageSpecsError('Request timeout', ErrorCodes.TIMEOUT));
-    });
-
-    request.end();
+  const opts = {
+    timeout: options.timeout ?? DEFAULT_OPTIONS.timeout,
+    headers: options.headers ?? DEFAULT_OPTIONS.headers,
+    maxBytes: options.maxBytes ?? DEFAULT_OPTIONS.maxBytes,
+    userAgent: options.userAgent ?? DEFAULT_OPTIONS.userAgent,
+  };
+  let currentUrl = validateUrl(url);
+  const headers = new Headers({
+    'User-Agent': opts.userAgent,
+    Accept: 'image/*,*/*;q=0.8',
+    'Accept-Encoding': 'identity',
+    Range: `bytes=0-${opts.maxBytes - 1}`,
   });
+  for (const [name, value] of Object.entries(opts.headers)) {
+    headers.set(name, value);
+  }
+
+  for (let redirectCount = 0; ; redirectCount += 1) {
+    const response = await fetchWithTimeout(currentUrl, new Headers(headers), opts.timeout);
+    const location = response.headers.get('location');
+
+    if (response.status >= 300 && response.status < 400 && location) {
+      await cancelBody(response);
+      if (redirectCount >= MAX_REDIRECTS) {
+        throw new ImageSpecsError('Too many redirects', ErrorCodes.NETWORK_ERROR);
+      }
+
+      const redirectUrl = validateUrl(location, currentUrl);
+      if (redirectUrl.origin !== currentUrl.origin) {
+        for (const header of SENSITIVE_HEADERS) {
+          headers.delete(header);
+        }
+      }
+      currentUrl = redirectUrl;
+      continue;
+    }
+
+    if (response.status !== 200 && response.status !== 206) {
+      await cancelBody(response);
+      throw new ImageSpecsError(
+        `HTTP ${response.status}: ${response.statusText || 'Unknown error'}`,
+        ErrorCodes.NETWORK_ERROR
+      );
+    }
+
+    const responseHeaders: Record<string, string> = {};
+    response.headers.forEach((value, name) => {
+      responseHeaders[name] = value;
+    });
+
+    return {
+      stream: response.body
+        ? Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>)
+        : Readable.from([]),
+      headers: responseHeaders,
+      statusCode: response.status,
+      url: currentUrl.toString(),
+    };
+  }
 }

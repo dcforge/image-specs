@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Readable } from 'stream';
 import {
   getImageSpecs,
@@ -40,11 +40,9 @@ vi.mock('../src/stream.js', async (importOriginal) => {
 
 describe('Image Specs Main API', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
+    // resetAllMocks (not restoreAllMocks) — since Vitest 4, restoreAllMocks only
+    // restores vi.spyOn spies, leaving vi.fn() module mocks to leak between tests.
+    vi.resetAllMocks();
   });
 
   describe('getImageSpecs', () => {

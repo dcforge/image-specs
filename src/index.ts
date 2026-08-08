@@ -1,17 +1,63 @@
 import { type Readable } from 'stream';
+import { open } from 'fs/promises';
 import { basename } from 'path';
 import { parseImage } from './parsers/index.js';
 import { detectFormat } from './utils/detector.js';
 import { fetchImageHeaders } from './http.js';
-import { readStreamWithTimeout, toReadableStream, isValidStream } from './stream.js';
+import { readStreamWithTimeout, isValidStream } from './stream.js';
 import {
   ImageSpecsError,
   ErrorCodes,
   DEFAULT_OPTIONS,
+  defined,
   type ImageSpecs,
   type ImageSpecsOptions,
   type ImageSource,
 } from './types.js';
+
+/** Bytes of a source that need inspecting to recognise its format */
+const DETECTION_BYTES = 1024;
+
+function limitBuffer(buffer: Buffer, maxBytes: number): Buffer {
+  return buffer.subarray(0, maxBytes > 0 ? maxBytes : 0);
+}
+
+function decodeDataUrl(source: string, maxBytes: number): Buffer {
+  try {
+    const base64Data = new URL(source).pathname.split(',')[1];
+    if (base64Data) {
+      const encodedBytes = Math.max(0, Math.ceil(maxBytes / 3) * 4);
+      return limitBuffer(Buffer.from(base64Data.slice(0, encodedBytes), 'base64'), maxBytes);
+    }
+  } catch {
+    throw new ImageSpecsError('Invalid data URL format', ErrorCodes.INVALID_URL);
+  }
+
+  throw new ImageSpecsError('URL input requires HTTP fetching', ErrorCodes.INVALID_URL);
+}
+
+async function readFilePrefix(path: string, maxBytes: number): Promise<Buffer> {
+  const file = await open(path, 'r');
+
+  try {
+    if (!(maxBytes > 0)) return Buffer.alloc(0);
+
+    const { size } = await file.stat();
+    const length = Math.min(size, Math.floor(maxBytes));
+    const buffer = Buffer.allocUnsafe(length);
+    let bytesRead = 0;
+
+    while (bytesRead < length) {
+      const result = await file.read(buffer, bytesRead, length - bytesRead, bytesRead);
+      if (result.bytesRead === 0) break;
+      bytesRead += result.bytesRead;
+    }
+
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await file.close();
+  }
+}
 
 /**
  * Extract image specifications from a URL, Buffer, or stream
@@ -44,10 +90,15 @@ export async function getImageSpecs(
   source: ImageSource,
   options: ImageSpecsOptions = {}
 ): Promise<ImageSpecs> {
-  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const opts = {
+    timeout: options.timeout ?? DEFAULT_OPTIONS.timeout,
+    headers: options.headers ?? DEFAULT_OPTIONS.headers,
+    maxBytes: options.maxBytes ?? DEFAULT_OPTIONS.maxBytes,
+    userAgent: options.userAgent ?? DEFAULT_OPTIONS.userAgent,
+  };
 
   try {
-    let stream: Readable;
+    let buffer: Buffer;
     let url: string | undefined;
     let path: string | undefined;
     let filename: string | undefined;
@@ -56,7 +107,7 @@ export async function getImageSpecs(
     if (typeof source === 'string') {
       // Handle data URLs
       if (source.startsWith('data:')) {
-        stream = toReadableStream(source);
+        buffer = decodeDataUrl(source, opts.maxBytes);
       } else if (source.startsWith('http://') || source.startsWith('https://')) {
         // Handle HTTP/HTTPS URLs
         url = source;
@@ -75,27 +126,20 @@ export async function getImageSpecs(
           );
         }
         const response = await fetchImageHeaders(source, opts);
-        stream = response.stream;
+        buffer = await readStreamWithTimeout(response.stream, opts.maxBytes, opts.timeout);
       } else {
         // Assume it's a file path
         path = source;
-        // Extract filename from path using proper path utilities
         filename = basename(source) || undefined;
-        // Read the file
-        const { readFile } = await import('fs/promises');
-        const buffer = await readFile(source);
-        stream = toReadableStream(buffer);
+        buffer = await readFilePrefix(source, opts.maxBytes);
       }
     } else if (Buffer.isBuffer(source)) {
-      stream = toReadableStream(source);
+      buffer = limitBuffer(source, opts.maxBytes);
     } else if (isValidStream(source)) {
-      stream = source;
+      buffer = await readStreamWithTimeout(source, opts.maxBytes, opts.timeout);
     } else {
       throw new ImageSpecsError('Invalid source type', ErrorCodes.INVALID_STREAM);
     }
-
-    // Read data from stream
-    let buffer = await readStreamWithTimeout(stream, opts.maxBytes, opts.timeout);
 
     if (buffer.length === 0) {
       throw new ImageSpecsError('No data received', ErrorCodes.INSUFFICIENT_DATA);
@@ -104,37 +148,17 @@ export async function getImageSpecs(
     // Parse image
     let parseResult = parseImage(buffer);
 
-    // If parsing failed and we have a URL source, try fetching more data
-    // This handles cases where metadata blocks are very large (e.g., Photoshop data)
-    const currentMaxBytes = opts.maxBytes ?? DEFAULT_OPTIONS.maxBytes;
-    if (!parseResult && url && buffer.length === currentMaxBytes) {
-      // Try with progressively larger buffers (up to 1MB)
-      const maxRetries = 3;
-      const increments = [currentMaxBytes * 2, currentMaxBytes * 4, 1048576]; // 128KB, 256KB, 1MB
-
-      for (let i = 0; i < maxRetries && !parseResult; i++) {
+    // Remote JPEGs can place their dimensions after large metadata segments.
+    const initialMaxBytes = opts.maxBytes ?? DEFAULT_OPTIONS.maxBytes;
+    if (!parseResult && url && buffer.length === initialMaxBytes) {
+      for (const maxBytes of [initialMaxBytes * 2, initialMaxBytes * 4, 1048576]) {
         try {
-          const newMaxBytes = increments[i];
-          if (newMaxBytes === undefined) continue;
-
-          const retryTimeout: number = opts.timeout ?? DEFAULT_OPTIONS.timeout;
-          const retryOpts: ImageSpecsOptions = {
-            timeout: retryTimeout,
-            maxBytes: newMaxBytes,
-            headers: opts.headers,
-            userAgent: opts.userAgent,
-          };
-          const response = await fetchImageHeaders(url, retryOpts);
-          buffer = await readStreamWithTimeout(response.stream, newMaxBytes, retryTimeout);
+          const response = await fetchImageHeaders(url, { ...opts, maxBytes });
+          buffer = await readStreamWithTimeout(response.stream, maxBytes, opts.timeout);
           parseResult = parseImage(buffer);
-        } catch (_error) {
-          // If retry fails, continue to next increment or give up
-          if (i === maxRetries - 1) {
-            throw new ImageSpecsError(
-              'Unsupported or corrupted image format',
-              ErrorCodes.UNSUPPORTED_FORMAT
-            );
-          }
+          if (parseResult) break;
+        } catch {
+          // Match the normal unsupported-format result after all retries fail.
         }
       }
     }
@@ -146,49 +170,17 @@ export async function getImageSpecs(
       );
     }
 
-    // Build final result
-    const result: ImageSpecs = {
-      width: parseResult.width,
-      height: parseResult.height,
-      type: parseResult.type,
-      mime: parseResult.mime,
-      wUnits: parseResult.wUnits ?? 'px',
-      hUnits: parseResult.hUnits ?? 'px',
+    const { wUnits, hUnits, width, height, type, mime, ...metadata } = parseResult;
+
+    return {
+      width,
+      height,
+      type,
+      mime,
+      wUnits: wUnits ?? 'px',
+      hUnits: hUnits ?? 'px',
+      ...defined({ ...metadata, url, path, filename }),
     };
-
-    // Add optional properties
-    if (parseResult.wResolution !== undefined) {
-      result.wResolution = parseResult.wResolution;
-    }
-    if (parseResult.hResolution !== undefined) {
-      result.hResolution = parseResult.hResolution;
-    }
-    if (parseResult.colorSpace !== undefined) {
-      result.colorSpace = parseResult.colorSpace;
-    }
-    if (parseResult.iccProfile !== undefined) {
-      result.iccProfile = parseResult.iccProfile;
-    }
-    if (parseResult.gamma !== undefined) {
-      result.gamma = parseResult.gamma;
-    }
-    if (parseResult.bitDepth !== undefined) {
-      result.bitDepth = parseResult.bitDepth;
-    }
-    if (parseResult.channels !== undefined) {
-      result.channels = parseResult.channels;
-    }
-    if (url !== undefined) {
-      result.url = url;
-    }
-    if (path !== undefined) {
-      result.path = path;
-    }
-    if (filename !== undefined) {
-      result.filename = filename;
-    }
-
-    return result;
   } catch (error) {
     if (error instanceof ImageSpecsError) {
       throw error;
@@ -270,61 +262,34 @@ export async function isImageSource(
   source: ImageSource,
   options: ImageSpecsOptions = {}
 ): Promise<boolean> {
+  const timeout = options.timeout ?? DEFAULT_OPTIONS.timeout;
+  const peek = (stream: Readable): Promise<Buffer> =>
+    readStreamWithTimeout(stream, DETECTION_BYTES, timeout);
+
   try {
-    // For buffers, use format detection
     if (Buffer.isBuffer(source)) {
-      return detectFormat(source) !== null;
+      return detectFormat(limitBuffer(source, DETECTION_BYTES)) !== null;
     }
 
-    // For streams, peek at the first few bytes
     if (isValidStream(source)) {
-      const buffer = await readStreamWithTimeout(
-        source,
-        1024,
-        options.timeout ?? DEFAULT_OPTIONS.timeout
-      );
-      return detectFormat(buffer) !== null;
+      return detectFormat(await peek(source)) !== null;
     }
 
-    // For URLs and file paths
-    if (typeof source === 'string') {
-      if (source.startsWith('data:')) {
-        const stream = toReadableStream(source);
-        const buffer = await readStreamWithTimeout(
-          stream,
-          1024,
-          options.timeout ?? DEFAULT_OPTIONS.timeout
-        );
-        return detectFormat(buffer) !== null;
-      }
-
-      // For HTTP/HTTPS URLs
-      if (source.startsWith('http://') || source.startsWith('https://')) {
-        try {
-          const { fetchImageHeaders } = await import('./http.js');
-          const response = await fetchImageHeaders(source, { ...options, maxBytes: 1024 });
-          const buffer = await readStreamWithTimeout(
-            response.stream,
-            1024,
-            options.timeout ?? DEFAULT_OPTIONS.timeout
-          );
-          return detectFormat(buffer) !== null;
-        } catch {
-          return false;
-        }
-      }
-
-      // For file paths
-      try {
-        const { readFile } = await import('fs/promises');
-        const buffer = await readFile(source);
-        return detectFormat(buffer.subarray(0, 1024)) !== null;
-      } catch {
-        return false;
-      }
+    if (typeof source !== 'string') {
+      return false;
     }
 
-    return false;
+    if (source.startsWith('data:')) {
+      return detectFormat(decodeDataUrl(source, DETECTION_BYTES)) !== null;
+    }
+
+    if (source.startsWith('http://') || source.startsWith('https://')) {
+      const response = await fetchImageHeaders(source, { ...options, maxBytes: DETECTION_BYTES });
+      return detectFormat(await peek(response.stream)) !== null;
+    }
+
+    // Assume a file path
+    return detectFormat(await readFilePrefix(source, DETECTION_BYTES)) !== null;
   } catch {
     return false;
   }
@@ -336,16 +301,15 @@ export type {
   ImageSpecsOptions,
   ImageSource,
   ParseResult,
-  ImageFormat,
   ErrorCode,
 } from './types.js';
 
-export { ImageSpecsError, ErrorCodes, DEFAULT_OPTIONS, SUPPORTED_FORMATS } from './types.js';
+export { ImageSpecsError, ErrorCodes, DEFAULT_OPTIONS } from './types.js';
 
 export { parseImage } from './parsers/index.js';
 
 // Export detector utilities for advanced usage
-export { detectFormat, getImageType, mightBeImage } from './utils/detector.js';
+export { detectFormat, getImageType } from './utils/detector.js';
 
 // Default export for CommonJS compatibility
 export default getImageSpecs;
