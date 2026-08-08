@@ -171,8 +171,8 @@ image-specs/
 │   │   └── ...
 │   ├── utils/         # Utility functions
 │   │   ├── buffer-reader.ts
-│   │   ├── bit-reader.ts
-│   │   └── image-utils.ts
+│   │   ├── color-space.ts
+│   │   └── detector.ts
 │   ├── types.ts       # TypeScript type definitions
 │   ├── index.ts       # Main entry point
 │   └── cli.ts         # CLI implementation
@@ -305,7 +305,7 @@ To add support for a new image format:
 1. **Create Parser File**: `src/parsers/[format].ts`
    ```typescript
    import type { ParseResult } from '../types.js';
-   import { BufferReader } from '../utils/index.js';
+   import { BufferReader } from '../utils/buffer-reader.js';
 
    export function parse[FORMAT](buffer: Buffer): ParseResult | null {
      // Validate minimum buffer size
