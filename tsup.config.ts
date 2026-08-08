@@ -30,11 +30,12 @@ export default defineConfig([
     outDir: 'dist',
     define,
   },
-  // CLI build
+  // CLI build. ESM only: the bin entry points at dist/cli.js, and a CJS build
+  // could never self-start anyway since its import.meta is stubbed out.
   {
     entry: ['src/cli.ts'],
-    format: ['esm', 'cjs'],
-    dts: true,
+    format: ['esm'],
+    dts: false,
     splitting: false,
     sourcemap: true,
     clean: false,
