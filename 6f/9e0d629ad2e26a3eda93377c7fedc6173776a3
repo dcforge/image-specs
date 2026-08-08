@@ -1,0 +1,29 @@
+package.json
+  s_e4f5530c107609::t_c0d381bba7c78c 3
+README.md
+  s_e4f5530c107609::t_c0d381bba7c78c 10-13
+CONTRIBUTING.md
+  s_e4f5530c107609::t_b4d9c03303f859 174-175
+  s_e4f5530c107609::t_cf03e57a323bf2 308
+src/parsers/jpeg.ts
+  s_e4f5530c107609::t_c0d381bba7c78c 220,224-225,228-238
+  s_e4f5530c107609::t_48140bec7fff9a 239
+package-lock.json
+  s_e4f5530c107609::t_ea454d97935214 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "6f9e0d629ad2e26a3eda93377c7fedc6173776a3",
+  "prompts": {},
+  "sessions": {
+    "s_e4f5530c107609": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fdef2-4303-7043-9a98-fd901a08dbce",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raymond De Castro <raymond@decastro.ph>"
+    }
+  }
+}
