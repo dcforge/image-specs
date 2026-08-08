@@ -96,14 +96,29 @@ export async function getImageSpecs(
     }
 
     // Read data from stream
-    const buffer = await readStreamWithTimeout(stream, opts.maxBytes, opts.timeout);
+    let buffer = await readStreamWithTimeout(stream, opts.maxBytes, opts.timeout);
 
     if (buffer.length === 0) {
       throw new ImageSpecsError('No data received', ErrorCodes.INSUFFICIENT_DATA);
     }
 
     // Parse image
-    const parseResult = parseImage(buffer);
+    let parseResult = parseImage(buffer);
+
+    // Remote JPEGs can place their dimensions after large metadata segments.
+    const initialMaxBytes = opts.maxBytes ?? DEFAULT_OPTIONS.maxBytes;
+    if (!parseResult && url && buffer.length === initialMaxBytes) {
+      for (const maxBytes of [initialMaxBytes * 2, initialMaxBytes * 4, 1048576]) {
+        try {
+          const response = await fetchImageHeaders(url, { ...opts, maxBytes });
+          buffer = await readStreamWithTimeout(response.stream, maxBytes, opts.timeout);
+          parseResult = parseImage(buffer);
+          if (parseResult) break;
+        } catch {
+          // Match the normal unsupported-format result after all retries fail.
+        }
+      }
+    }
 
     if (!parseResult) {
       throw new ImageSpecsError(
