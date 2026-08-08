@@ -408,9 +408,9 @@ npm run clean
 
 The package is optimized for minimal bundle size:
 
-- **ESM build**: ~51KB (index.js)
-- **CommonJS build**: ~57KB (index.cjs)
-- **CLI tool**: ~53KB (cli.js) / ~58KB (cli.cjs)
+- **ESM build**: ~43KB (index.js)
+- **CommonJS build**: ~45KB (index.cjs)
+- **CLI tool**: ~49KB (cli.js)
 - **Zero dependencies**
 - **Tree-shakeable exports**
 - **Full TypeScript definitions included**
