@@ -51,6 +51,10 @@ function parseJFIF(reader: BufferReader): { wResolution?: number; hResolution?: 
   const xDensity = reader.readUInt16();
   const yDensity = reader.readUInt16();
 
+  if (xDensity === 0 || yDensity === 0) {
+    return {};
+  }
+
   // Convert density to DPI based on units
   if (densityUnits === 1) {
     // dots per inch
@@ -111,15 +115,17 @@ function parseEXIF(reader: BufferReader): { wResolution?: number; hResolution?: 
 
   // Check byte order (MM for big-endian, II for little-endian)
   const byteOrder = reader.readString(2);
+  if (byteOrder !== 'II' && byteOrder !== 'MM') {
+    return {};
+  }
   const isLittleEndian = byteOrder === 'II';
 
   // Create a new reader with proper endianness for TIFF data
   const tiffReader = new BufferReader(reader.getBuffer(), isLittleEndian);
-  tiffReader.seek(tiffStart);
-  tiffReader.skip(2); // Skip byte order marker
-
-  // Skip TIFF magic number
-  tiffReader.skip(2);
+  tiffReader.seek(tiffStart + 2);
+  if (tiffReader.readUInt16() !== 42) {
+    return {};
+  }
 
   // Read IFD offset
   const ifdOffset = tiffReader.readUInt32() + tiffStart;
@@ -239,7 +245,8 @@ export function parseJPEG(buffer: Buffer): ParseResult | null {
 
     // Parse JFIF segment for resolution
     if (marker === MARKERS.APP0) {
-      const resolution = parseJFIF(reader);
+      const segment = buffer.subarray(segmentStart, segmentStart + segmentLength - 2);
+      const resolution = parseJFIF(new BufferReader(segment));
       // Only use JFIF resolution if we haven't found EXIF resolution yet
       if (wResolution === undefined) {
         wResolution = resolution.wResolution;
@@ -249,7 +256,8 @@ export function parseJPEG(buffer: Buffer): ParseResult | null {
 
     // Parse EXIF segment for resolution (prefer EXIF over JFIF)
     if (marker === MARKERS.APP1) {
-      const resolution = parseEXIF(reader);
+      const segment = buffer.subarray(segmentStart, segmentStart + segmentLength - 2);
+      const resolution = parseEXIF(new BufferReader(segment));
       // EXIF resolution takes precedence over JFIF
       if (resolution.wResolution !== undefined) {
         wResolution = resolution.wResolution;
