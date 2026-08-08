@@ -1,0 +1,19 @@
+.github/workflows/ci.yml
+  s_e4f5530c107609::t_cc9906fe25ca2c 49,108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "61ba3a87e2b6d6407ab23127043a777b13296fdf",
+  "prompts": {},
+  "sessions": {
+    "s_e4f5530c107609": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fdef2-4303-7043-9a98-fd901a08dbce",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raymond De Castro <raymond@decastro.ph>"
+    }
+  }
+}
