@@ -65,18 +65,6 @@ export interface ImageSpecsOptions {
 }
 
 /**
- * Image format information
- */
-export interface ImageFormat {
-  /** File extension */
-  ext: string;
-  /** MIME type */
-  mime: string;
-  /** Magic bytes for format detection */
-  signature: Buffer | Buffer[];
-}
-
-/**
  * Parser result containing image dimensions and metadata
  */
 export interface ParseResult {
@@ -173,49 +161,3 @@ export const DEFAULT_OPTIONS: Required<ImageSpecsOptions> = {
   maxBytes: 65536, // 64KB
   userAgent: `image-specs/${PACKAGE_VERSION}`,
 };
-
-/**
- * Supported image formats with their signatures
- */
-export const SUPPORTED_FORMATS: readonly ImageFormat[] = [
-  {
-    ext: 'jpg',
-    mime: 'image/jpeg',
-    signature: Buffer.from([0xff, 0xd8, 0xff]),
-  },
-  {
-    ext: 'png',
-    mime: 'image/png',
-    signature: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  },
-  {
-    ext: 'gif',
-    mime: 'image/gif',
-    signature: [Buffer.from('GIF87a'), Buffer.from('GIF89a')],
-  },
-  {
-    ext: 'webp',
-    mime: 'image/webp',
-    signature: Buffer.from('WEBP', 'ascii'),
-  },
-  {
-    ext: 'bmp',
-    mime: 'image/bmp',
-    signature: Buffer.from([0x42, 0x4d]),
-  },
-  {
-    ext: 'svg',
-    mime: 'image/svg+xml',
-    signature: Buffer.from('<svg'),
-  },
-  {
-    ext: 'avif',
-    mime: 'image/avif',
-    signature: Buffer.from('ftypavif'),
-  },
-  {
-    ext: 'ico',
-    mime: 'image/x-icon',
-    signature: Buffer.from([0x00, 0x00, 0x01, 0x00]),
-  },
-] as const;

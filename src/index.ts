@@ -244,16 +244,15 @@ export type {
   ImageSpecsOptions,
   ImageSource,
   ParseResult,
-  ImageFormat,
   ErrorCode,
 } from './types.js';
 
-export { ImageSpecsError, ErrorCodes, DEFAULT_OPTIONS, SUPPORTED_FORMATS } from './types.js';
+export { ImageSpecsError, ErrorCodes, DEFAULT_OPTIONS } from './types.js';
 
 export { parseImage } from './parsers/index.js';
 
 // Export detector utilities for advanced usage
-export { detectFormat, getImageType, mightBeImage } from './utils/detector.js';
+export { detectFormat, getImageType } from './utils/detector.js';
 
 // Default export for CommonJS compatibility
 export default getImageSpecs;

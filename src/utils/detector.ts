@@ -106,38 +106,3 @@ export function getImageType(buffer: Buffer): string | null {
 
   return DETECTORS.find((detector) => detector.validate(buffer))?.ext ?? null;
 }
-
-/**
- * Type guard to check if buffer might be an image
- */
-export function mightBeImage(buffer: Buffer): boolean {
-  if (buffer.length < 2) return false;
-
-  // Quick check for common image format markers
-  const firstByte = buffer[0];
-  const secondByte = buffer[1];
-
-  // Common first bytes of images
-  switch (firstByte) {
-    case 0xff: // JPEG
-      return secondByte === 0xd8;
-    case 0x89: // PNG
-      return secondByte === 0x50;
-    case 0x47: // GIF ('G')
-      return secondByte === 0x49; // 'I'
-    case 0x52: // RIFF/WebP ('R')
-      return secondByte === 0x49; // 'I'
-    case 0x42: // BMP ('B')
-      return secondByte === 0x4d; // 'M'
-    case 0x00: // ICO or AVIF
-      return true; // Need more bytes to determine
-    case 0x3c: // '<' - Possibly SVG
-      return true;
-    default:
-      // Check for AVIF (starts with size + 'ftyp')
-      if (buffer.length >= 8) {
-        return matchesSignature(buffer, 'ftyp', 4);
-      }
-      return false;
-  }
-}
