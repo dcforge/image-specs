@@ -1,0 +1,26 @@
+tests/cli.test.ts
+  s_5329b99a88578e::t_1c3ffddf5af481 1-27,36-46
+  s_5329b99a88578e::t_5b3c9788c21156 28-35
+src/cli.ts
+  s_5329b99a88578e::t_ab1324f836e408 320-339,341
+  s_5329b99a88578e::t_61d577432f94e1 88
+  s_5329b99a88578e::t_500d493f32e297 131-132
+  s_5329b99a88578e::t_ae89f776512941 3-4
+  s_5329b99a88578e::t_8553ced2fb07b3 160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "948d413d1c30524bfa2eb85ec1ce5dfe4c076654",
+  "prompts": {},
+  "sessions": {
+    "s_5329b99a88578e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "67a350a4-ecc4-41f7-adb7-a13234452549",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raymond De Castro <raymond@decastro.ph>"
+    }
+  }
+}
