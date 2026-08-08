@@ -1,0 +1,19 @@
+.github/workflows/release.yml
+  s_e4f5530c107609::t_b7a236d4b6b127 5,9,11,13,37-39,41-43,47-51,54-64,66,75-76,88-89,91-94,99,101,106,108-109,111-114,116-120,122-125,127-130,132,135-137,147,155-157,162-163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "8c04a228c6871195f5a1c1c782c26f9ad9dd3edb",
+  "prompts": {},
+  "sessions": {
+    "s_e4f5530c107609": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fdef2-4303-7043-9a98-fd901a08dbce",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raymond De Castro <raymond@decastro.ph>"
+    }
+  }
+}
