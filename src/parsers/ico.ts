@@ -16,11 +16,7 @@ interface IcoEntry {
 /**
  * Read one 16-byte ICO directory entry
  */
-function readDirectoryEntry(reader: BufferReader): IcoEntry | null {
-  if (!reader.canRead(ENTRY_SIZE)) {
-    return null;
-  }
-
+function readDirectoryEntry(reader: BufferReader): IcoEntry {
   const width = reader.readUInt8() || 256; // 0 means 256
   const height = reader.readUInt8() || 256; // 0 means 256
   reader.skip(4); // colorCount, reserved, planes
@@ -33,8 +29,7 @@ function readDirectoryEntry(reader: BufferReader): IcoEntry | null {
 /**
  * Prefer the largest image, breaking ties on colour depth
  */
-function isBetter(entry: IcoEntry, best: IcoEntry | null): boolean {
-  if (!best) return true;
+function isBetter(entry: IcoEntry, best: IcoEntry): boolean {
   if (entry.width !== best.width) return entry.width > best.width;
   if (entry.height !== best.height) return entry.height > best.height;
   return entry.bitCount > best.bitCount;
@@ -59,17 +54,13 @@ export function parseICO(buffer: Buffer): ParseResult | null {
     return null;
   }
 
-  let best: IcoEntry | null = null;
+  let best = readDirectoryEntry(reader);
 
-  for (let i = 0; i < count; i++) {
+  for (let i = 1; i < count; i++) {
     const entry = readDirectoryEntry(reader);
-    if (entry && entry.width > 0 && entry.height > 0 && isBetter(entry, best)) {
+    if (isBetter(entry, best)) {
       best = entry;
     }
-  }
-
-  if (!best) {
-    return null;
   }
 
   return {

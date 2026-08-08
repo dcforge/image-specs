@@ -55,7 +55,7 @@ function parseVP8L(reader: BufferReader): { width: number; height: number } | nu
  */
 function parseVP8X(
   reader: BufferReader
-): { width: number; height: number; hasICC?: boolean; hasAlpha?: boolean } | null {
+): { width: number; height: number; hasAlpha: boolean } | null {
   if (!reader.canRead(10)) {
     return null;
   }
@@ -64,7 +64,6 @@ function parseVP8X(
   const flags = reader.readUInt8();
 
   // Extract flag bits
-  const hasICC = (flags & 0x20) !== 0; // Bit 5: ICC profile
   const hasAlpha = (flags & 0x10) !== 0; // Bit 4: Alpha channel
 
   // Skip reserved bits (3 bytes)
@@ -80,7 +79,7 @@ function parseVP8X(
   const height =
     ((heightBytes[0] ?? 0) | ((heightBytes[1] ?? 0) << 8) | ((heightBytes[2] ?? 0) << 16)) + 1;
 
-  return { width, height, hasICC, hasAlpha };
+  return { width, height, hasAlpha };
 }
 
 /**
@@ -109,38 +108,9 @@ export function parseWebP(buffer: Buffer): ParseResult | null {
   let width: number | undefined;
   let height: number | undefined;
   let hasAlpha = false;
+  let sawVP8X = false;
   let colorSpace: string | undefined;
   let iccProfileName: string | undefined;
-
-  // First pass: look for VP8X to get metadata flags
-  const firstPassPosition = reader.getPosition();
-  while (reader.canRead(8)) {
-    const chunkId = reader.readString(4);
-    const chunkSize = reader.readUInt32();
-
-    if (!reader.canRead(chunkSize)) {
-      break;
-    }
-
-    const chunkStart = reader.getPosition();
-
-    if (chunkId === 'VP8X') {
-      const vp8xData = parseVP8X(reader);
-      if (vp8xData) {
-        width = vp8xData.width;
-        height = vp8xData.height;
-        hasAlpha = vp8xData.hasAlpha ?? false;
-        // hasICC flag just indicates presence, actual color space will be extracted from the profile
-      }
-      break;
-    }
-
-    // Move to next chunk (pad to even byte boundary)
-    reader.seek(chunkStart + ((chunkSize + 1) & ~1));
-  }
-
-  // Reset to start of chunks for second pass
-  reader.seek(firstPassPosition);
 
   while (reader.canRead(8)) {
     const chunkId = reader.readString(4);
@@ -175,7 +145,15 @@ export function parseWebP(buffer: Buffer): ParseResult | null {
         break;
 
       case 'VP8X':
-        // Already handled in first pass
+        if (!sawVP8X && chunkSize === 10) {
+          const vp8xData = parseVP8X(reader);
+          if (vp8xData) {
+            width = vp8xData.width;
+            height = vp8xData.height;
+            hasAlpha = vp8xData.hasAlpha;
+            sawVP8X = true;
+          }
+        }
         break;
 
       case 'ICCP': {

@@ -1,12 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { Readable } from 'stream';
-import { readStreamWithTimeout, toReadableStream, isValidStream } from '../src/stream.js';
+import { readStreamWithTimeout, isValidStream } from '../src/stream.js';
 import { ImageSpecsError, ErrorCodes } from '../src/types.js';
 
 describe('Stream Utilities', () => {
   beforeEach(() => {
     vi.clearAllTimers();
     vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('readStreamWithTimeout', () => {
@@ -82,60 +86,54 @@ describe('Stream Utilities', () => {
 
       await expect(readStreamWithTimeout(stream, 10, 1000)).rejects.toThrow(ImageSpecsError);
     });
-  });
 
-  describe('toReadableStream', () => {
-    it('should return readable stream as-is', () => {
-      const stream = new Readable();
-      const result = toReadableStream(stream);
-      expect(result).toBe(stream);
+    it('should accept Uint8Array chunks', async () => {
+      const stream = Readable.from([Uint8Array.from([1, 2, 3])]);
+
+      await expect(readStreamWithTimeout(stream, 10, 1000)).resolves.toEqual(
+        Buffer.from([1, 2, 3])
+      );
     });
 
-    it('should convert buffer to readable stream', async () => {
-      const buffer = Buffer.from('Test data');
-      const stream = toReadableStream(buffer);
+    it('should reject non-binary chunks without throwing outside the promise', async () => {
+      for (const chunks of [['text'], [{ value: 'object' }]]) {
+        const stream = Readable.from(chunks);
 
-      expect(stream).toBeInstanceOf(Readable);
+        await expect(readStreamWithTimeout(stream, 10, 1000)).rejects.toMatchObject({
+          code: ErrorCodes.INVALID_STREAM,
+          message: 'Stream error: Expected binary data',
+        });
+        expect(stream.destroyed).toBe(true);
+      }
+    });
 
-      const chunks: Buffer[] = [];
-      stream.on('data', (chunk) => chunks.push(chunk));
-
-      await new Promise<void>((resolve) => {
-        stream.on('end', resolve);
+    it('should map source errors immediately', async () => {
+      const stream = new Readable({
+        read() {
+          this.destroy(new Error('source failed'));
+        },
       });
 
-      const result = Buffer.concat(chunks);
-      expect(result).toEqual(buffer);
-    });
-
-    it('should handle data URLs', async () => {
-      const originalData = Buffer.from('Hello World');
-      const dataUrl = `data:text/plain;base64,${originalData.toString('base64')}`;
-
-      const stream = toReadableStream(dataUrl);
-      const chunks: Buffer[] = [];
-
-      stream.on('data', (chunk) => chunks.push(chunk));
-
-      await new Promise<void>((resolve) => {
-        stream.on('end', resolve);
+      await expect(readStreamWithTimeout(stream, 10, 1000)).rejects.toMatchObject({
+        code: ErrorCodes.INVALID_STREAM,
+        message: 'Stream error: source failed',
       });
-
-      const result = Buffer.concat(chunks);
-      expect(result).toEqual(originalData);
     });
 
-    it('should throw error for invalid data URL', () => {
-      const invalidDataUrl = 'data:invalid';
-      expect(() => toReadableStream(invalidDataUrl)).toThrow(ImageSpecsError);
-    });
+    it('should reject a premature close immediately', async () => {
+      const stream = new Readable({
+        read() {
+          // Wait for the explicit close below.
+        },
+      });
+      const result = readStreamWithTimeout(stream, 10, 1000);
 
-    it('should throw error for regular URLs', () => {
-      expect(() => toReadableStream('https://example.com')).toThrow(ImageSpecsError);
-    });
+      stream.destroy();
 
-    it('should throw error for unsupported types', () => {
-      expect(() => toReadableStream(123 as any)).toThrow(ImageSpecsError);
+      await expect(result).rejects.toMatchObject({
+        code: ErrorCodes.INVALID_STREAM,
+        message: 'Stream error: Premature close',
+      });
     });
   });
 

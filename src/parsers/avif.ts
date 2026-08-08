@@ -48,8 +48,8 @@ function parseFtyp(reader: BufferReader, size: number): boolean {
 /**
  * Parse ispe (Image Spatial Extents) box for dimensions
  */
-function parseIspe(reader: BufferReader): { width: number; height: number } | null {
-  if (!reader.canRead(12)) {
+function parseIspe(reader: BufferReader, size: number): { width: number; height: number } | null {
+  if (size < 12 || !reader.canRead(12)) {
     return null;
   }
 
@@ -94,10 +94,13 @@ function parseColr(
 /**
  * Parse AVIF box structure
  */
-function parseBox(reader: BufferReader): { type: string; size: number; dataOffset: number } | null {
+function parseBox(
+  reader: BufferReader,
+  endPosition = reader.getBuffer().length
+): { type: string; size: number; dataOffset: number } | null {
   const boxStart = reader.getPosition();
 
-  if (!reader.canRead(8)) {
+  if (endPosition - boxStart < 8 || !reader.canRead(8)) {
     return null;
   }
 
@@ -107,7 +110,7 @@ function parseBox(reader: BufferReader): { type: string; size: number; dataOffse
 
   // Handle extended size
   if (size === 1) {
-    if (!reader.canRead(8)) {
+    if (endPosition - reader.getPosition() < 8 || !reader.canRead(8)) {
       return null;
     }
     // Read 64-bit size (we'll only use the lower 32 bits)
@@ -115,8 +118,13 @@ function parseBox(reader: BufferReader): { type: string; size: number; dataOffse
     size = reader.readUInt32();
     dataOffset = reader.getPosition();
   } else if (size === 0) {
-    // Box extends to end of file
-    size = reader.getBuffer().length - boxStart;
+    // Box extends to the end of its containing box
+    size = endPosition - boxStart;
+  }
+
+  const headerSize = dataOffset - boxStart;
+  if (size < headerSize || size > endPosition - boxStart) {
+    return null;
   }
 
   return { type, size, dataOffset };
@@ -132,7 +140,7 @@ function findBox(
 ): { position: number; size: number } | null {
   while (reader.getPosition() < endPosition) {
     const boxStart = reader.getPosition();
-    const box = parseBox(reader);
+    const box = parseBox(reader, endPosition);
     if (!box) {
       break;
     }
@@ -200,7 +208,7 @@ export function parseAVIF(buffer: Buffer): ParseResult | null {
               const ispeBox = findBox(reader, ipcoEnd, 'ispe');
               if (ispeBox) {
                 reader.seek(ispeBox.position);
-                const dimensions = parseIspe(reader);
+                const dimensions = parseIspe(reader, ispeBox.size);
                 if (dimensions) {
                   width = dimensions.width;
                   height = dimensions.height;

@@ -2,18 +2,6 @@ import { defined, type ParseResult } from '../types.js';
 import { BufferReader } from '../utils/buffer-reader.js';
 
 /**
- * PNG chunk types
- */
-const CHUNK_TYPES = {
-  IHDR: 'IHDR',
-  pHYs: 'pHYs',
-  sRGB: 'sRGB',
-  iCCP: 'iCCP',
-  gAMA: 'gAMA',
-  IEND: 'IEND',
-} as const;
-
-/**
  * PNG signature
  */
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -62,7 +50,7 @@ export function parsePNG(buffer: Buffer): ParseResult | null {
     const chunkDataStart = reader.getPosition();
 
     switch (chunkType) {
-      case CHUNK_TYPES.IHDR:
+      case 'IHDR':
         if (chunkLength === 13) {
           width = reader.readUInt32();
           height = reader.readUInt32();
@@ -71,7 +59,7 @@ export function parsePNG(buffer: Buffer): ParseResult | null {
         }
         break;
 
-      case CHUNK_TYPES.pHYs:
+      case 'pHYs':
         if (chunkLength === 9) {
           const xPixelsPerUnit = reader.readUInt32();
           const yPixelsPerUnit = reader.readUInt32();
@@ -89,21 +77,22 @@ export function parsePNG(buffer: Buffer): ParseResult | null {
         }
         break;
 
-      case CHUNK_TYPES.sRGB:
+      case 'sRGB':
         if (chunkLength >= 1) {
           colorSpace = 'sRGB';
         }
         break;
 
-      case CHUNK_TYPES.iCCP:
+      case 'iCCP':
         if (chunkLength > 0) {
+          const name = reader.readBytes(Math.min(chunkLength, MAX_ICC_NAME_LENGTH));
+          const terminator = name.indexOf(0);
           iccProfile =
-            reader.readNullTerminatedString(Math.min(chunkLength, MAX_ICC_NAME_LENGTH), 'latin1') ||
-            undefined;
+            name.toString('latin1', 0, terminator < 0 ? name.length : terminator) || undefined;
         }
         break;
 
-      case CHUNK_TYPES.gAMA:
+      case 'gAMA':
         if (chunkLength === 4) {
           gamma = reader.readUInt32() / 100000;
         }
@@ -113,7 +102,7 @@ export function parsePNG(buffer: Buffer): ParseResult | null {
     // Skip any unread chunk data plus the CRC
     reader.seek(chunkDataStart + chunkLength + 4);
 
-    if (chunkType === CHUNK_TYPES.IEND) {
+    if (chunkType === 'IEND') {
       break;
     }
   }

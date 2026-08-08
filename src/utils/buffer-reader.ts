@@ -75,25 +75,6 @@ export class BufferReader {
   }
 
   /**
-   * Read null-terminated string
-   */
-  readNullTerminatedString(maxLength?: number, encoding: BufferEncoding = 'utf8'): string {
-    const start = this.position;
-    const max = maxLength
-      ? Math.min(this.position + maxLength, this.buffer.length)
-      : this.buffer.length;
-
-    let end = start;
-    while (end < max && this.buffer[end] !== 0) {
-      end++;
-    }
-
-    const str = this.buffer.toString(encoding, start, end);
-    this.position = end < max ? end + 1 : end; // Skip null terminator if found
-    return str;
-  }
-
-  /**
    * Read bytes as Buffer
    */
   readBytes(length: number): Buffer {
@@ -146,15 +127,5 @@ export class BufferReader {
    */
   getBuffer(): Buffer {
     return this.buffer;
-  }
-
-  /**
-   * Peek unsigned 8-bit integer without advancing
-   */
-  peekUInt8(): number {
-    if (this.position >= this.buffer.length) {
-      throw new Error('Attempt to peek past buffer');
-    }
-    return this.buffer[this.position] ?? 0;
   }
 }

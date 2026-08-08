@@ -1,10 +1,10 @@
 import { type Readable } from 'stream';
-import { readFile } from 'fs/promises';
+import { open } from 'fs/promises';
 import { basename } from 'path';
 import { parseImage } from './parsers/index.js';
 import { detectFormat } from './utils/detector.js';
 import { fetchImageHeaders } from './http.js';
-import { readStreamWithTimeout, toReadableStream, isValidStream } from './stream.js';
+import { readStreamWithTimeout, isValidStream } from './stream.js';
 import {
   ImageSpecsError,
   ErrorCodes,
@@ -17,6 +17,47 @@ import {
 
 /** Bytes of a source that need inspecting to recognise its format */
 const DETECTION_BYTES = 1024;
+
+function limitBuffer(buffer: Buffer, maxBytes: number): Buffer {
+  return buffer.subarray(0, maxBytes > 0 ? maxBytes : 0);
+}
+
+function decodeDataUrl(source: string, maxBytes: number): Buffer {
+  try {
+    const base64Data = new URL(source).pathname.split(',')[1];
+    if (base64Data) {
+      const encodedBytes = Math.max(0, Math.ceil(maxBytes / 3) * 4);
+      return limitBuffer(Buffer.from(base64Data.slice(0, encodedBytes), 'base64'), maxBytes);
+    }
+  } catch {
+    throw new ImageSpecsError('Invalid data URL format', ErrorCodes.INVALID_URL);
+  }
+
+  throw new ImageSpecsError('URL input requires HTTP fetching', ErrorCodes.INVALID_URL);
+}
+
+async function readFilePrefix(path: string, maxBytes: number): Promise<Buffer> {
+  const file = await open(path, 'r');
+
+  try {
+    if (!(maxBytes > 0)) return Buffer.alloc(0);
+
+    const { size } = await file.stat();
+    const length = Math.min(size, Math.floor(maxBytes));
+    const buffer = Buffer.allocUnsafe(length);
+    let bytesRead = 0;
+
+    while (bytesRead < length) {
+      const result = await file.read(buffer, bytesRead, length - bytesRead, bytesRead);
+      if (result.bytesRead === 0) break;
+      bytesRead += result.bytesRead;
+    }
+
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await file.close();
+  }
+}
 
 /**
  * Extract image specifications from a URL, Buffer, or stream
@@ -49,10 +90,15 @@ export async function getImageSpecs(
   source: ImageSource,
   options: ImageSpecsOptions = {}
 ): Promise<ImageSpecs> {
-  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const opts = {
+    timeout: options.timeout ?? DEFAULT_OPTIONS.timeout,
+    headers: options.headers ?? DEFAULT_OPTIONS.headers,
+    maxBytes: options.maxBytes ?? DEFAULT_OPTIONS.maxBytes,
+    userAgent: options.userAgent ?? DEFAULT_OPTIONS.userAgent,
+  };
 
   try {
-    let stream: Readable;
+    let buffer: Buffer;
     let url: string | undefined;
     let path: string | undefined;
     let filename: string | undefined;
@@ -61,7 +107,7 @@ export async function getImageSpecs(
     if (typeof source === 'string') {
       // Handle data URLs
       if (source.startsWith('data:')) {
-        stream = toReadableStream(source);
+        buffer = decodeDataUrl(source, opts.maxBytes);
       } else if (source.startsWith('http://') || source.startsWith('https://')) {
         // Handle HTTP/HTTPS URLs
         url = source;
@@ -80,23 +126,20 @@ export async function getImageSpecs(
           );
         }
         const response = await fetchImageHeaders(source, opts);
-        stream = response.stream;
+        buffer = await readStreamWithTimeout(response.stream, opts.maxBytes, opts.timeout);
       } else {
         // Assume it's a file path
         path = source;
         filename = basename(source) || undefined;
-        stream = toReadableStream(await readFile(source));
+        buffer = await readFilePrefix(source, opts.maxBytes);
       }
     } else if (Buffer.isBuffer(source)) {
-      stream = toReadableStream(source);
+      buffer = limitBuffer(source, opts.maxBytes);
     } else if (isValidStream(source)) {
-      stream = source;
+      buffer = await readStreamWithTimeout(source, opts.maxBytes, opts.timeout);
     } else {
       throw new ImageSpecsError('Invalid source type', ErrorCodes.INVALID_STREAM);
     }
-
-    // Read data from stream
-    let buffer = await readStreamWithTimeout(stream, opts.maxBytes, opts.timeout);
 
     if (buffer.length === 0) {
       throw new ImageSpecsError('No data received', ErrorCodes.INSUFFICIENT_DATA);
@@ -225,7 +268,7 @@ export async function isImageSource(
 
   try {
     if (Buffer.isBuffer(source)) {
-      return detectFormat(source) !== null;
+      return detectFormat(limitBuffer(source, DETECTION_BYTES)) !== null;
     }
 
     if (isValidStream(source)) {
@@ -237,7 +280,7 @@ export async function isImageSource(
     }
 
     if (source.startsWith('data:')) {
-      return detectFormat(await peek(toReadableStream(source))) !== null;
+      return detectFormat(decodeDataUrl(source, DETECTION_BYTES)) !== null;
     }
 
     if (source.startsWith('http://') || source.startsWith('https://')) {
@@ -246,8 +289,7 @@ export async function isImageSource(
     }
 
     // Assume a file path
-    const buffer = await readFile(source);
-    return detectFormat(buffer.subarray(0, DETECTION_BYTES)) !== null;
+    return detectFormat(await readFilePrefix(source, DETECTION_BYTES)) !== null;
   } catch {
     return false;
   }

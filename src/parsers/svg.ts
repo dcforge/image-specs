@@ -47,13 +47,6 @@ const PIXELS_PER_UNIT: Record<string, number> = {
 };
 
 /**
- * Convert various units to pixels (rough approximation)
- */
-function convertToPixels(value: number, unit: string): number {
-  return value * (PIXELS_PER_UNIT[unit] ?? 1);
-}
-
-/**
  * Resolve a raw width/height attribute to pixels and its reported unit
  */
 function readDimension(raw: string | undefined): { pixels: number; unit: string } | undefined {
@@ -63,7 +56,7 @@ function readDimension(raw: string | undefined): { pixels: number; unit: string 
   }
 
   return {
-    pixels: convertToPixels(dimension.value, dimension.unit),
+    pixels: dimension.value * (PIXELS_PER_UNIT[dimension.unit] ?? 1),
     unit: dimension.unit === '' ? 'px' : dimension.unit,
   };
 }
@@ -96,12 +89,13 @@ export function parseSVG(buffer: Buffer): ParseResult | null {
   const heightMatch = /height\s*=\s*["']([^"']+)["']/i.exec(svgTag);
   const viewBoxMatch = /viewBox\s*=\s*["']([^"']+)["']/i.exec(svgTag);
 
-  const parsed = { width: readDimension(widthMatch?.[1]), height: readDimension(heightMatch?.[1]) };
+  const parsedWidth = readDimension(widthMatch?.[1]);
+  const parsedHeight = readDimension(heightMatch?.[1]);
 
-  let width = parsed.width?.pixels;
-  let height = parsed.height?.pixels;
-  let wUnits = parsed.width?.unit ?? 'px';
-  let hUnits = parsed.height?.unit ?? 'px';
+  let width = parsedWidth?.pixels;
+  let height = parsedHeight?.pixels;
+  let wUnits = parsedWidth?.unit ?? 'px';
+  let hUnits = parsedHeight?.unit ?? 'px';
 
   // Fall back to viewBox if width/height not found
   if ((width === undefined || height === undefined) && viewBoxMatch?.[1]) {

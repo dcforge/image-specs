@@ -2,115 +2,69 @@ import { Readable } from 'stream';
 import { ImageSpecsError, ErrorCodes } from './types.js';
 
 /**
- * Read data from stream with timeout support
+ * Read binary data from a stream up to maxBytes, failing if the read stalls.
  */
 export async function readStreamWithTimeout(
   stream: Readable,
   maxBytes: number,
   timeoutMs: number
 ): Promise<Buffer> {
-  return new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let totalLength = 0;
-    let timeoutId: NodeJS.Timeout | undefined;
+  const chunks: Buffer[] = [];
+  let acceptedLength = 0;
+  let reachedLimit = maxBytes <= 0;
+  let timedOut = false;
+  const timeoutError = new ImageSpecsError('Stream read timeout', ErrorCodes.TIMEOUT);
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    stream.destroy(timeoutError);
+  }, timeoutMs);
 
-    const cleanup = (): void => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = undefined;
-      }
-      stream.removeListener('data', onData);
-      stream.removeListener('end', onEnd);
-      stream.removeListener('error', onError);
-    };
-
-    /**
-     * Abandon the source once we have what we need. Pausing is not enough: the
-     * stream would sit half-read holding its socket or file handle open, and
-     * anything still flowing would be downloaded only to be discarded.
-     */
-    const stop = (): void => {
-      cleanup();
-      if (!stream.destroyed) {
-        // Our error listener is gone by now, and an unhandled 'error' during
-        // teardown would take down the process
-        stream.on('error', () => undefined);
-        stream.destroy();
-      }
-    };
-
-    const onData = (chunk: Buffer): void => {
-      chunks.push(chunk);
-      totalLength += chunk.length;
-
-      // Stop reading once we have maxBytes
-      if (totalLength >= maxBytes) {
-        stop();
-        resolve(Buffer.concat(chunks).subarray(0, maxBytes));
-      }
-    };
-
-    const onEnd = (): void => {
-      cleanup();
-      if (totalLength === 0) {
-        reject(new ImageSpecsError('Stream ended without data', ErrorCodes.INSUFFICIENT_DATA));
-      } else {
-        resolve(Buffer.concat(chunks));
-      }
-    };
-
-    const onError = (error: Error): void => {
-      cleanup();
-      reject(new ImageSpecsError(`Stream error: ${error.message}`, ErrorCodes.INVALID_STREAM));
-    };
-
-    const onTimeout = (): void => {
-      stop();
-      reject(new ImageSpecsError('Stream read timeout', ErrorCodes.TIMEOUT));
-    };
-
-    // Set up timeout
-    timeoutId = setTimeout(onTimeout, timeoutMs);
-
-    // Set up stream listeners
-    stream.on('data', onData);
-    stream.on('end', onEnd);
-    stream.on('error', onError);
-  });
-}
-
-/**
- * Convert various input types to a readable stream
- */
-export function toReadableStream(input: string | Buffer | Readable): Readable {
-  if (input instanceof Readable) {
-    return input;
-  }
-
-  if (Buffer.isBuffer(input)) {
-    return Readable.from(input);
-  }
-
-  if (typeof input === 'string') {
-    // Handle data URLs
-    if (input.startsWith('data:')) {
-      try {
-        const dataUrl = new URL(input);
-        const base64Data = dataUrl.pathname.split(',')[1];
-        if (base64Data) {
-          const buffer = Buffer.from(base64Data, 'base64');
-          return Readable.from(buffer);
+  try {
+    if (reachedLimit) {
+      stream.destroy();
+    } else {
+      for await (const chunk of stream.iterator({ destroyOnReturn: false })) {
+        if (!Buffer.isBuffer(chunk) && !(chunk instanceof Uint8Array)) {
+          throw new TypeError('Expected binary data');
         }
-      } catch {
-        throw new ImageSpecsError('Invalid data URL format', ErrorCodes.INVALID_URL);
+
+        const buffer = Buffer.isBuffer(chunk)
+          ? chunk
+          : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+        const accepted = buffer.subarray(0, maxBytes - acceptedLength);
+        if (accepted.length > 0) {
+          chunks.push(accepted);
+          acceptedLength += accepted.length;
+        }
+
+        if (acceptedLength >= maxBytes) {
+          reachedLimit = true;
+          stream.destroy();
+          break;
+        }
       }
     }
-
-    // For regular URLs, we need to use the HTTP utilities
-    throw new ImageSpecsError('URL input requires HTTP fetching', ErrorCodes.INVALID_URL);
+  } catch (error) {
+    if (timedOut) {
+      throw timeoutError;
+    }
+    if (!stream.destroyed) {
+      stream.destroy();
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ImageSpecsError(`Stream error: ${message}`, ErrorCodes.INVALID_STREAM);
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  throw new ImageSpecsError('Unsupported input type', ErrorCodes.INVALID_STREAM);
+  if (!reachedLimit && stream.destroyed && !stream.readableEnded) {
+    throw new ImageSpecsError('Stream error: Premature close', ErrorCodes.INVALID_STREAM);
+  }
+  if (acceptedLength === 0 && !reachedLimit) {
+    throw new ImageSpecsError('Stream ended without data', ErrorCodes.INSUFFICIENT_DATA);
+  }
+
+  return Buffer.concat(chunks, acceptedLength);
 }
 
 /**
