@@ -1,0 +1,25 @@
+src/parsers/jpeg.ts
+  s_e4f5530c107609::t_90cbae4060b9c2 54-57,118-120,125-128,248-249,259-260
+tests/jpeg-resolution.test.ts
+  s_e4f5530c107609::t_cf458a25bf35c4 1-6,9-11,13-54,57-84,86-110,112-168
+  s_e4f5530c107609::t_3c979b76c7bde2 7-8
+  s_e4f5530c107609::t_c524d74e17d8c4 12,55-56,85,111
+vitest.config.ts
+  s_e4f5530c107609::t_1c334cbe0ad745 23-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "72730b6ec7e6e6e892a0514354cb673862aef6f9",
+  "prompts": {},
+  "sessions": {
+    "s_e4f5530c107609": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fdef2-4303-7043-9a98-fd901a08dbce",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raymond De Castro <raymond@decastro.ph>"
+    }
+  }
+}
