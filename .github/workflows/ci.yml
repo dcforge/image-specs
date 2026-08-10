@@ -115,7 +115,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.coverage == true
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage/coverage-final.json
           flags: unittests
