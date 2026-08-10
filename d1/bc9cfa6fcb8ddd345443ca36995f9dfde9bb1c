@@ -1,0 +1,25 @@
+.github/workflows/pr-checks.yml
+  s_036c0e291ae0be::t_876e1bef0d87dd 73,106
+.github/workflows/release.yml
+  s_036c0e291ae0be::t_876e1bef0d87dd 86,153
+.github/workflows/ci.yml
+  s_036c0e291ae0be::t_876e1bef0d87dd 23,82,118
+.github/workflows/dependency-review.yml
+  s_036c0e291ae0be::t_876e1bef0d87dd 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "d1bc9cfa6fcb8ddd345443ca36995f9dfde9bb1c",
+  "prompts": {},
+  "sessions": {
+    "s_036c0e291ae0be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ed51da1f-555a-406f-a559-bef9e3abc31a",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Raymond De Castro <raymond@decastro.ph>"
+    }
+  }
+}
